@@ -302,8 +302,8 @@ export default function WorkoutScreen() {
             <View style={styles.adjustCard}>
               {/* Weight adjuster */}
               <View style={styles.adjusterRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
-                  <Text style={styles.adjusterLabel}>Weight (kg)</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flex: 1, flexShrink: 1 }}>
+                  <Text style={styles.adjusterLabel} numberOfLines={1}>Weight (kg)</Text>
                   {weightBadge && (
                     <View style={[styles.weightBadge, { backgroundColor: weightBadge.startsWith('+') ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)' }]}>
                       <Text style={[styles.weightBadgeText, { color: weightBadge.startsWith('+') ? 'rgb(34,197,94)' : 'rgb(239,68,68)' }]}>{weightBadge}</Text>
@@ -510,7 +510,7 @@ const styles = StyleSheet.create({
   },
   adjusterRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   adjusterLabel: { fontSize: 14, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
-  adjusterControls: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  adjusterControls: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, flexShrink: 0 },
   adjusterButton: {
     width: 48, height: 48, borderRadius: radius.md,
     backgroundColor: 'rgba(212,255,0,0.1)', borderWidth: 1, borderColor: 'rgba(212,255,0,0.2)',
