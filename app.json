@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Aura",
+    "slug": "aura-fitness",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "aura",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#20230f"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.aura.fitness"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#20230f"
+      },
+      "package": "com.aura.fitness"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-sqlite"
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "aura-server",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@google/genai": "latest",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0"
+  }
+}
