@@ -1,13 +1,24 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView, AppState,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
+import * as Notifications from 'expo-notifications';
+import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { startSession, endSession, logSet as dbLogSet, getExerciseProgressionData } from '../lib/database';
+
+// Show notification even when app is foregrounded
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+  }),
+});
 
 export default function WorkoutScreen() {
   const router = useRouter();
@@ -19,6 +30,9 @@ export default function WorkoutScreen() {
   const [currentSet, setCurrentSet] = useState(1);
   const [isResting, setIsResting] = useState(false);
   const [restRemaining, setRestRemaining] = useState(0);
+  const restEndTimeRef = useRef(null);
+  const pendingAdvanceRef = useRef(null);
+  const restNotifIdRef = useRef(null);
   const [rpe, setRpe] = useState(null);
   const [weightBadge, setWeightBadge] = useState(null);
 
@@ -67,31 +81,79 @@ export default function WorkoutScreen() {
     }
   }, [currentExIdx]);
 
-  // Start session
+  // Start session & request notification permissions
   useEffect(() => {
     const init = async () => {
       if (day) {
         const id = await startSession(day.day, day.focus);
         setSessionId(id);
       }
+      await Notifications.requestPermissionsAsync();
     };
     init();
   }, []);
 
-  // Rest timer
+  // Schedule a local notification for when rest ends
+  const scheduleRestNotification = async (seconds) => {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Rest Complete',
+        body: 'Time to hit your next set!',
+        sound: true,
+      },
+      trigger: { type: 'timeInterval', seconds, repeats: false },
+    });
+    restNotifIdRef.current = id;
+  };
+
+  const cancelRestNotification = async () => {
+    if (restNotifIdRef.current) {
+      await Notifications.cancelScheduledNotificationAsync(restNotifIdRef.current);
+      restNotifIdRef.current = null;
+    }
+  };
+
+  // Advance to next set/exercise when rest completes
+  const completeRest = useCallback(() => {
+    setIsResting(false);
+    setRestRemaining(0);
+    restEndTimeRef.current = null;
+    cancelRestNotification();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const advance = pendingAdvanceRef.current;
+    pendingAdvanceRef.current = null;
+    if (advance) advance();
+  }, []);
+
+  // Rest timer - uses end timestamp so it survives backgrounding
   useEffect(() => {
-    if (!isResting || restRemaining <= 0) return;
+    if (!isResting || !restEndTimeRef.current) return;
     const interval = setInterval(() => {
-      setRestRemaining(t => {
-        if (t <= 1) {
-          setIsResting(false);
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
+      const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
+      if (remaining <= 0) {
+        completeRest();
+      } else {
+        setRestRemaining(remaining);
+      }
+    }, 250);
     return () => clearInterval(interval);
-  }, [isResting, restRemaining]);
+  }, [isResting, completeRest]);
+
+  // Recalculate rest timer when app returns to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active' && restEndTimeRef.current) {
+        const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
+        if (remaining <= 0) {
+          completeRest();
+        } else {
+          setRestRemaining(remaining);
+          setIsResting(true);
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [completeRest]);
 
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60);
@@ -110,36 +172,42 @@ export default function WorkoutScreen() {
       await dbLogSet(sessionId, currentExercise.name, currentSet, weight, 'kg', reps, rpe, restDuration);
     }
 
-    // Start rest
+    // Start rest with absolute end timestamp
+    restEndTimeRef.current = Date.now() + restDuration * 1000;
     setIsResting(true);
     setRestRemaining(restDuration);
+    scheduleRestNotification(restDuration);
 
-    // Advance set/exercise after rest
+    // Queue what happens after rest completes
     if (currentSet >= totalSets) {
-      // Move to next exercise
       if (currentExIdx < exercises.length - 1) {
-        setTimeout(() => {
+        pendingAdvanceRef.current = () => {
           setCurrentExIdx(prev => prev + 1);
           setCurrentSet(1);
-          setIsResting(false);
-          setRestRemaining(0);
-        }, restDuration * 1000);
+        };
       } else {
-        // Workout complete
-        setTimeout(async () => {
-          if (sessionId) await endSession(sessionId);
+        const sid = sessionId;
+        pendingAdvanceRef.current = async () => {
+          if (sid) await endSession(sid);
           router.back();
-        }, restDuration * 1000);
+        };
       }
     } else {
       setCurrentSet(prev => prev + 1);
+      pendingAdvanceRef.current = null;
     }
   };
 
   const handleSkipRest = () => {
+    restEndTimeRef.current = null;
+    cancelRestNotification();
+    const advance = pendingAdvanceRef.current;
+    pendingAdvanceRef.current = null;
     setIsResting(false);
     setRestRemaining(0);
-    if (currentSet > totalSets && currentExIdx < exercises.length - 1) {
+    if (advance) {
+      advance();
+    } else if (currentSet > totalSets && currentExIdx < exercises.length - 1) {
       setCurrentExIdx(prev => prev + 1);
       setCurrentSet(1);
     }
