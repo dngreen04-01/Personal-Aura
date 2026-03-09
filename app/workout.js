@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, AppState,
+  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -9,7 +10,8 @@ import Slider from '@react-native-community/slider';
 import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getExerciseProgressionData } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getExerciseProgressionData, getUserProfile } from '../lib/database';
+import { sendCoachMessage } from '../lib/api';
 
 // Show notification even when app is foregrounded
 Notifications.setNotificationHandler({
@@ -46,6 +48,12 @@ export default function WorkoutScreen() {
   const [weight, setWeight] = useState(targetWeight);
   const [reps, setReps] = useState(targetReps);
   const [pushSuggestion, setPushSuggestion] = useState(null);
+  const [inputText, setInputText] = useState('');
+  const [isInputMode, setIsInputMode] = useState(false);
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiResponse, setAiResponse] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+  const inputRef = useRef(null);
 
   // Reset weight/reps/rpe when exercise changes, apply progressive overload
   useEffect(() => {
@@ -89,6 +97,10 @@ export default function WorkoutScreen() {
         setSessionId(id);
       }
       await Notifications.requestPermissionsAsync();
+      try {
+        const profile = await getUserProfile();
+        setUserProfile(profile);
+      } catch {}
     };
     init();
   }, []);
@@ -165,6 +177,31 @@ export default function WorkoutScreen() {
   const completedSets = exercises.slice(0, currentExIdx).reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0) + (currentSet - 1);
   const grandTotalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
   const progressPercent = grandTotalSets > 0 ? Math.round((completedSets / grandTotalSets) * 100) : 0;
+
+  const handleSend = async () => {
+    const text = inputText.trim();
+    if (!text || isAiLoading) return;
+    setInputText('');
+    setAiResponse(null);
+    setIsAiLoading(true);
+    try {
+      const userContext = {
+        goal: userProfile?.goal,
+        equipment: userProfile?.equipment,
+        currentExercise: currentExercise?.name,
+        currentSet: `Set ${currentSet} of ${totalSets}`,
+        targetReps,
+        currentWeight: weight,
+        isResting,
+      };
+      const data = await sendCoachMessage(text, [], userContext);
+      setAiResponse({ text: data.text });
+    } catch {
+      setAiResponse({ text: 'Connection error — keep pushing!' });
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
 
   const handleDone = async () => {
     // Log to DB
@@ -363,15 +400,74 @@ export default function WorkoutScreen() {
       </ScrollView>
 
       {/* Bottom Voice Bar */}
-      <View style={styles.voiceBar}>
-        <View style={styles.voiceBarInner}>
-          <View style={styles.micIcon}>
-            <MaterialIcons name="mic" size={18} color={colors.bgDark} />
-          </View>
-          <Text style={styles.voicePrompt}>"Ready for the next set?"</Text>
-          <MaterialIcons name="keyboard" size={20} color="rgba(212,255,0,0.3)" />
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.voiceBar}>
+          {/* AI Response Bubble */}
+          {(aiResponse || isAiLoading) && (
+            <View style={styles.aiResponseContainer}>
+              {isAiLoading ? (
+                <View style={styles.aiLoadingRow}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.aiLoadingText}>Thinking...</Text>
+                </View>
+              ) : (
+                <Text style={styles.aiResponseText}>{aiResponse.text}</Text>
+              )}
+            </View>
+          )}
+
+          {/* Input Row */}
+          {isInputMode ? (
+            <View style={styles.voiceBarInner}>
+              <TextInput
+                ref={inputRef}
+                style={styles.chatInput}
+                placeholder="Ask your coach..."
+                placeholderTextColor="rgba(255,255,255,0.3)"
+                value={inputText}
+                onChangeText={setInputText}
+                onSubmitEditing={handleSend}
+                returnKeyType="send"
+                autoFocus
+                onBlur={() => { if (!inputText.trim()) setIsInputMode(false); }}
+              />
+              <TouchableOpacity
+                onPress={handleSend}
+                disabled={isAiLoading || !inputText.trim()}
+                style={styles.sendButton}
+              >
+                {isAiLoading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <MaterialIcons
+                    name="send"
+                    size={20}
+                    color={inputText.trim() ? colors.primary : 'rgba(212,255,0,0.3)'}
+                  />
+                )}
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.voiceBarInner}
+              onPress={() => {
+                setAiResponse(null);
+                setIsInputMode(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <View style={styles.micIcon}>
+                <MaterialIcons name="mic" size={18} color={colors.bgDark} />
+              </View>
+              <Text style={styles.voicePrompt}>"Ready for the next set?"</Text>
+              <MaterialIcons name="keyboard" size={20} color="rgba(212,255,0,0.3)" />
+            </TouchableOpacity>
+          )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
 
       {/* Rest timer preview (top right, when not resting) */}
       {!isResting && (
@@ -555,6 +651,28 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
   },
   voicePrompt: { flex: 1, fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic' },
+  chatInput: {
+    flex: 1, fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+  },
+  sendButton: {
+    width: 36, height: 36, borderRadius: 18,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  aiResponseContainer: {
+    backgroundColor: 'rgba(212,255,0,0.08)', borderRadius: radius.md,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.15)',
+    padding: spacing.sm, marginBottom: spacing.xs,
+  },
+  aiResponseText: {
+    fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textPrimary, lineHeight: 19,
+  },
+  aiLoadingRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+  },
+  aiLoadingText: {
+    fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic',
+  },
 
   // Rest preview (top right ghost)
   restPreview: {
