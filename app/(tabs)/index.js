@@ -59,19 +59,25 @@ export default function ChatScreen() {
 
       if (savedPlan && Array.isArray(savedPlan)) {
         setPlan(savedPlan);
-        const firstWorkout = savedPlan.find(d => !d.focus.toLowerCase().includes('rest'));
-        setTodayWorkout(firstWorkout);
 
-        setMessages([
-          { role: 'model', text: `Great progress! You're into the **"Hypertrophy Foundations"** block.` },
-          { role: 'model', text: `Ready for today's session? We're focusing on **${firstWorkout?.focus || 'your workout'}**.` },
-        ]);
-      } else {
+        // Skip default workout selection if returning from change-focus
+        if (!params.selectedDayJson) {
+          const firstWorkout = savedPlan.find(d => !d.focus.toLowerCase().includes('rest'));
+          setTodayWorkout(firstWorkout);
+
+          setMessages([
+            { role: 'model', text: `Great progress! You're into the **"Hypertrophy Foundations"** block.` },
+            { role: 'model', text: `Ready for today's session? We're focusing on **${firstWorkout?.focus || 'your workout'}**.` },
+          ]);
+        }
+      } else if (!params.selectedDayJson) {
         setMessages([{ role: 'model', text: "Welcome to Aura. What are we hitting today?" }]);
       }
     } catch (e) {
       console.error(e);
-      setMessages([{ role: 'model', text: "Welcome to Aura. Let's crush today's workout." }]);
+      if (!params.selectedDayJson) {
+        setMessages([{ role: 'model', text: "Welcome to Aura. Let's crush today's workout." }]);
+      }
     }
   };
 

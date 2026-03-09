@@ -24,13 +24,32 @@ const EQUIPMENT = [
 
 const GENDERS = ['Male', 'Female', 'Non-binary'];
 
-const ASSESSMENT_EXERCISES = [
-  { name: 'Dumbbell Goblet Squat', unit: 'kg' },
-  { name: 'Dumbbell Romanian Deadlift', unit: 'kg/ea' },
-  { name: 'Flat Dumbbell Bench Press', unit: 'kg/ea' },
-  { name: 'Seated Dumbbell Overhead Press', unit: 'kg/ea' },
-  { name: 'Lat Pulldown', unit: 'kg' },
-];
+function getAssessmentExercises(equipment) {
+  let lowerBody;
+  if (equipment === 'commercial_gym') {
+    lowerBody = [
+      { name: 'Machine Leg Press', unit: 'kg' },
+      { name: 'Machine Leg Curl', unit: 'kg' },
+    ];
+  } else if (equipment === 'home_gym') {
+    lowerBody = [
+      { name: 'Dumbbell Bulgarian Split Squat', unit: 'kg/ea' },
+      { name: 'Dumbbell Hip Thrust', unit: 'kg' },
+    ];
+  } else {
+    lowerBody = [
+      { name: 'Bodyweight Squat', unit: 'reps' },
+      { name: 'Glute Bridge', unit: 'reps' },
+    ];
+  }
+
+  return [
+    ...lowerBody,
+    { name: 'Flat Dumbbell Bench Press', unit: 'kg/ea' },
+    { name: 'Seated Dumbbell Overhead Press', unit: 'kg/ea' },
+    { name: 'Lat Pulldown', unit: 'kg' },
+  ];
+}
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -45,9 +64,7 @@ export default function OnboardingScreen() {
   const [selectedGoal, setSelectedGoal] = useState(null);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
   const [bodyStats, setBodyStats] = useState({ age: '', weight: '', gender: 'Male' });
-  const [baselines, setBaselines] = useState(
-    Object.fromEntries(ASSESSMENT_EXERCISES.map(e => [e.name, { weight: '', reps: '' }]))
-  );
+  const [baselines, setBaselines] = useState({});
   const [schedule, setSchedule] = useState({ daysPerWeek: 4, minutesPerSession: 60 });
   const [currentStep, setCurrentStep] = useState('goal');
 
@@ -91,6 +108,8 @@ export default function OnboardingScreen() {
   };
 
   const handleScheduleSubmit = () => {
+    const exercises = getAssessmentExercises(selectedEquipment);
+    setBaselines(Object.fromEntries(exercises.map(e => [e.name, { weight: '', reps: '' }])));
     addMessages(
       { role: 'user', text: `${schedule.daysPerWeek} days/week, ${schedule.minutesPerSession} min/session` },
       {
@@ -103,10 +122,11 @@ export default function OnboardingScreen() {
   };
 
   const handleFinishAssessment = async () => {
+    const exercises = getAssessmentExercises(selectedEquipment);
     const formattedBaselines = {};
-    for (const exercise of ASSESSMENT_EXERCISES) {
+    for (const exercise of exercises) {
       const entry = baselines[exercise.name];
-      if (entry.weight && entry.reps) {
+      if (entry?.weight && entry?.reps) {
         formattedBaselines[exercise.name] = {
           weight: Number(entry.weight),
           reps: Number(entry.reps),
@@ -188,6 +208,7 @@ export default function OnboardingScreen() {
                 schedule={schedule}
                 setSchedule={setSchedule}
                 onScheduleSubmit={handleScheduleSubmit}
+                assessmentExercises={getAssessmentExercises(selectedEquipment)}
                 baselines={baselines}
                 setBaselines={setBaselines}
                 onFinishAssessment={handleFinishAssessment}
@@ -232,7 +253,7 @@ function AuraMessage({
   text, widgetType, currentStep, onGoalSelect, onEquipmentSelect, selectedEquipment,
   bodyStats, setBodyStats, onBodyStatsSubmit,
   schedule, setSchedule, onScheduleSubmit,
-  baselines, setBaselines, onFinishAssessment,
+  assessmentExercises, baselines, setBaselines, onFinishAssessment,
 }) {
   return (
     <View style={styles.auraRow}>
@@ -291,6 +312,7 @@ function AuraMessage({
 
         {widgetType === 'assessment' && currentStep === 'assessment' && (
           <StrengthAssessmentWidget
+            exercises={assessmentExercises}
             baselines={baselines}
             setBaselines={setBaselines}
             onFinish={onFinishAssessment}
@@ -363,7 +385,7 @@ function BodyStatsWidget({ bodyStats, setBodyStats, onSubmit }) {
   );
 }
 
-function StrengthAssessmentWidget({ baselines, setBaselines, onFinish }) {
+function StrengthAssessmentWidget({ exercises, baselines, setBaselines, onFinish }) {
   const updateBaseline = (exercise, field, value) => {
     setBaselines(prev => ({
       ...prev,
@@ -378,7 +400,7 @@ function StrengthAssessmentWidget({ baselines, setBaselines, onFinish }) {
         <Text style={styles.assessmentTitle}>Strength Assessment</Text>
       </View>
 
-      {ASSESSMENT_EXERCISES.map(exercise => (
+      {exercises.map(exercise => (
         <View key={exercise.name} style={styles.exerciseBlock}>
           <Text style={styles.exerciseName}>{exercise.name}</Text>
           <View style={{ flexDirection: 'row', gap: spacing.sm }}>
