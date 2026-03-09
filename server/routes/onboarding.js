@@ -2,7 +2,7 @@ const express = require('express');
 const { GoogleGenAI } = require('@google/genai');
 const router = express.Router();
 
-const MODEL_NAME = 'gemini-2.5-pro';
+const MODEL_NAME = 'gemini-2.5-flash';
 
 const systemPrompt = `You are Aura's advanced programming engine. Generate a highly effective, dynamic workout plan based on the user's profile, baseline strength assessment, and schedule preferences.
 

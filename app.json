@@ -28,6 +28,13 @@
       "expo-router",
       "expo-font",
       "expo-sqlite"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "e367cd9c-5d96-4989-b181-a23cecde5d78"
+      }
+    },
+    "owner": "damiengreen04"
   }
 }
