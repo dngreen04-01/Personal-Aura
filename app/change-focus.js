@@ -46,8 +46,8 @@ export default function ChangeFocusScreen() {
 
   const handleSelect = (day) => {
     router.replace({
-      pathname: '/(tabs)',
-      params: { selectedDayJson: JSON.stringify(day) },
+      pathname: '/workout-summary',
+      params: { dayJson: JSON.stringify(day) },
     });
   };
 
