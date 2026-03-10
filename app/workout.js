@@ -47,6 +47,7 @@ export default function WorkoutScreen() {
   const restDuration = parseInt(currentExercise?.restSeconds) || 90;
 
   const [weight, setWeight] = useState(targetWeight);
+  const [lastLoggedWeight, setLastLoggedWeight] = useState(null);
   const [reps, setReps] = useState(targetReps);
   const [pushSuggestion, setPushSuggestion] = useState(null);
   const [inputText, setInputText] = useState('');
@@ -69,6 +70,7 @@ export default function WorkoutScreen() {
       setRpe(null);
       setWeightBadge(null);
       setPushSuggestion(null);
+      setLastLoggedWeight(null);
       setIsEditingWeight(false);
 
       (async () => {
@@ -224,6 +226,7 @@ export default function WorkoutScreen() {
     if (sessionId && currentExercise) {
       await dbLogSet(sessionId, currentExercise.name, currentSet, weight, weightUnit, reps, rpe, restDuration);
     }
+    setLastLoggedWeight(weight);
 
     // Proactive coach suggestion when RPE is low — suggest pushing weight up
     if (rpe !== null && currentSet < totalSets) {
@@ -367,7 +370,7 @@ export default function WorkoutScreen() {
             <View style={styles.targetSection}>
               <Text style={styles.targetLabel}>TARGET GOAL</Text>
               <View style={styles.targetValues}>
-                <Text style={styles.targetNumber}>{weightUnit === 'lbs' ? Math.round(targetWeight * 2.20462) : targetWeight}<Text style={styles.targetUnit}>{weightUnit}</Text></Text>
+                <Text style={styles.targetNumber}>{lastLoggedWeight != null ? lastLoggedWeight : (weightUnit === 'lbs' ? Math.round(targetWeight * 2.20462) : targetWeight)}<Text style={styles.targetUnit}>{weightUnit}</Text></Text>
                 <Text style={styles.targetX}> × </Text>
                 <Text style={styles.targetNumber}>{targetReps}<Text style={styles.targetUnit}>Reps</Text></Text>
               </View>
