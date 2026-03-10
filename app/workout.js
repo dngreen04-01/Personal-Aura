@@ -10,8 +10,9 @@ import Slider from '@react-native-community/slider';
 import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getExerciseProgressionData, getUserProfile } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
 import { sendCoachMessage } from '../lib/api';
+import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 
 // Show notification even when app is foregrounded
 Notifications.setNotificationHandler({
@@ -53,37 +54,51 @@ export default function WorkoutScreen() {
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [weightUnit, setWeightUnit] = useState('kg');
+  const [isEditingWeight, setIsEditingWeight] = useState(false);
+  const [weightInputText, setWeightInputText] = useState('');
+  const [weightIncrement, setWeightIncrement] = useState(2.5);
   const inputRef = useRef(null);
+  const weightInputRef = useRef(null);
 
   // Reset weight/reps/rpe when exercise changes, apply progressive overload
   useEffect(() => {
     if (currentExercise) {
-      const planWeight = parseFloat(currentExercise.targetWeight) || 0;
+      const planWeightKg = parseFloat(currentExercise.targetWeight) || 0;
       setReps(parseInt(currentExercise.reps) || 8);
       setRpe(null);
       setWeightBadge(null);
       setPushSuggestion(null);
+      setIsEditingWeight(false);
 
       (async () => {
         try {
-          const progression = await getExerciseProgressionData(currentExercise.name);
-          if (progression.suggestedWeight && progression.suggestedWeight !== planWeight) {
+          // Load per-exercise unit preference
+          const unit = await getExerciseUnitPreference(currentExercise.name);
+          setWeightUnit(unit);
+          setWeightIncrement(getDefaultIncrement(unit));
+
+          const progression = await getExerciseProgressionData(currentExercise.name, 4, unit);
+          // Plan target is always in kg — convert to display unit
+          const planWeightDisplay = unit === 'lbs' ? Math.round(planWeightKg * 2.20462) : planWeightKg;
+
+          if (progression.suggestedWeight && progression.suggestedWeight !== planWeightDisplay) {
             setWeight(progression.suggestedWeight);
-            const diff = progression.suggestedWeight - planWeight;
+            const diff = progression.suggestedWeight - planWeightDisplay;
             if (diff > 0) {
-              setWeightBadge(`+${diff}kg`);
-            } else {
-              setWeightBadge(`${Math.round(((progression.suggestedWeight / planWeight) - 1) * 100)}%`);
+              setWeightBadge(formatWeightBadge(diff, unit));
+            } else if (planWeightDisplay > 0) {
+              setWeightBadge(`${Math.round(((progression.suggestedWeight / planWeightDisplay) - 1) * 100)}%`);
             }
-            // Show push suggestion when AI recommends increasing
-            if (progression.pushReason && progression.suggestedWeight > planWeight) {
+            if (progression.pushReason && progression.suggestedWeight > planWeightDisplay) {
               setPushSuggestion(progression.pushReason);
             }
           } else {
-            setWeight(planWeight);
+            setWeight(planWeightDisplay);
           }
         } catch {
-          setWeight(planWeight);
+          const planWeightDisplay = weightUnit === 'lbs' ? Math.round(planWeightKg * 2.20462) : planWeightKg;
+          setWeight(planWeightDisplay);
         }
       })();
     }
@@ -192,6 +207,7 @@ export default function WorkoutScreen() {
         currentSet: `Set ${currentSet} of ${totalSets}`,
         targetReps,
         currentWeight: weight,
+        weightUnit,
         isResting,
       };
       const data = await sendCoachMessage(text, [], userContext);
@@ -206,7 +222,33 @@ export default function WorkoutScreen() {
   const handleDone = async () => {
     // Log to DB
     if (sessionId && currentExercise) {
-      await dbLogSet(sessionId, currentExercise.name, currentSet, weight, 'kg', reps, rpe, restDuration);
+      await dbLogSet(sessionId, currentExercise.name, currentSet, weight, weightUnit, reps, rpe, restDuration);
+    }
+
+    // Proactive coach suggestion when RPE is low — suggest pushing weight up
+    if (rpe !== null && currentSet < totalSets) {
+      const goal = (userProfile?.goal || '').toLowerCase();
+      let pushThreshold;
+      if (goal.includes('strength')) {
+        pushThreshold = 8;
+      } else if (goal.includes('fat') || goal.includes('lose')) {
+        pushThreshold = 6;
+      } else {
+        pushThreshold = 7;
+      }
+
+      if (rpe < pushThreshold) {
+        const lowerKeywords = ['squat', 'deadlift', 'rdl', 'lunge', 'leg press', 'leg curl',
+          'leg extension', 'hip thrust', 'calf', 'glute', 'hamstring', 'step up', 'step-up',
+          'goblet', 'hack squat', 'bulgarian'];
+        const isLower = lowerKeywords.some(kw => (currentExercise.name || '').toLowerCase().includes(kw));
+        const incrementKg = isLower ? 5 : 2.5;
+        const increment = weightUnit === 'lbs' ? Math.round(incrementKg * 2.20462) : incrementKg;
+        const suggestedWeight = weight + increment;
+        setAiResponse({
+          text: `RPE ${rpe} — you've got more in the tank! Try ${suggestedWeight}${weightUnit} next set.`,
+        });
+      }
     }
 
     // Start rest with absolute end timestamp
@@ -325,7 +367,7 @@ export default function WorkoutScreen() {
             <View style={styles.targetSection}>
               <Text style={styles.targetLabel}>TARGET GOAL</Text>
               <View style={styles.targetValues}>
-                <Text style={styles.targetNumber}>{targetWeight}<Text style={styles.targetUnit}>kg</Text></Text>
+                <Text style={styles.targetNumber}>{weightUnit === 'lbs' ? Math.round(targetWeight * 2.20462) : targetWeight}<Text style={styles.targetUnit}>{weightUnit}</Text></Text>
                 <Text style={styles.targetX}> × </Text>
                 <Text style={styles.targetNumber}>{targetReps}<Text style={styles.targetUnit}>Reps</Text></Text>
               </View>
@@ -340,7 +382,20 @@ export default function WorkoutScreen() {
               {/* Weight adjuster */}
               <View style={styles.adjusterRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flex: 1, flexShrink: 1 }}>
-                  <Text style={styles.adjusterLabel} numberOfLines={1}>Weight (kg)</Text>
+                  <Text style={styles.adjusterLabel} numberOfLines={1}>Weight</Text>
+                  <TouchableOpacity
+                    style={styles.unitToggle}
+                    onPress={() => {
+                      const newUnit = weightUnit === 'kg' ? 'lbs' : 'kg';
+                      const converted = snapToIncrement(convertWeight(weight, weightUnit, newUnit), newUnit);
+                      setWeight(converted);
+                      setWeightUnit(newUnit);
+                      setWeightIncrement(getDefaultIncrement(newUnit));
+                      setExerciseUnitPreference(currentExercise.name, newUnit);
+                    }}
+                  >
+                    <Text style={styles.unitToggleText}>{weightUnit.toUpperCase()}</Text>
+                  </TouchableOpacity>
                   {weightBadge && (
                     <View style={[styles.weightBadge, { backgroundColor: weightBadge.startsWith('+') ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)' }]}>
                       <Text style={[styles.weightBadgeText, { color: weightBadge.startsWith('+') ? 'rgb(34,197,94)' : 'rgb(239,68,68)' }]}>{weightBadge}</Text>
@@ -350,14 +405,58 @@ export default function WorkoutScreen() {
                 <View style={styles.adjusterControls}>
                   <TouchableOpacity
                     style={styles.adjusterButton}
-                    onPress={() => setWeight(w => Math.max(0, w - 2.5))}
+                    onPress={() => setWeight(w => Math.max(0, w - weightIncrement))}
                   >
                     <MaterialIcons name="remove" size={22} color={colors.primary} />
                   </TouchableOpacity>
-                  <Text style={styles.adjusterValue}>{weight}</Text>
+                  <View style={styles.adjusterValueContainer}>
+                    {isEditingWeight ? (
+                      <TextInput
+                        ref={weightInputRef}
+                        style={styles.adjusterValueInput}
+                        value={weightInputText}
+                        onChangeText={setWeightInputText}
+                        keyboardType="decimal-pad"
+                        autoFocus
+                        selectTextOnFocus
+                        onSubmitEditing={() => {
+                          const parsed = parseFloat(weightInputText);
+                          if (!isNaN(parsed) && parsed >= 0) {
+                            setWeight(snapToIncrement(parsed, weightUnit));
+                          }
+                          setIsEditingWeight(false);
+                        }}
+                        onBlur={() => {
+                          const parsed = parseFloat(weightInputText);
+                          if (!isNaN(parsed) && parsed >= 0) {
+                            setWeight(snapToIncrement(parsed, weightUnit));
+                          }
+                          setIsEditingWeight(false);
+                        }}
+                      />
+                    ) : (
+                      <TouchableOpacity
+                        onPress={() => {
+                          setWeightInputText(formatWeight(weight, weightUnit));
+                          setIsEditingWeight(true);
+                        }}
+                      >
+                        <Text style={styles.adjusterValue} numberOfLines={1}>{formatWeight(weight, weightUnit)}</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const increments = getIncrements(weightUnit);
+                        const idx = increments.indexOf(weightIncrement);
+                        setWeightIncrement(increments[(idx + 1) % increments.length]);
+                      }}
+                    >
+                      <Text style={styles.incrementLabel}>±{weightIncrement}</Text>
+                    </TouchableOpacity>
+                  </View>
                   <TouchableOpacity
                     style={styles.adjusterButton}
-                    onPress={() => setWeight(w => w + 2.5)}
+                    onPress={() => setWeight(w => w + weightIncrement)}
                   >
                     <MaterialIcons name="add" size={22} color={colors.primary} />
                   </TouchableOpacity>
@@ -612,7 +711,19 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(212,255,0,0.1)', borderWidth: 1, borderColor: 'rgba(212,255,0,0.2)',
     justifyContent: 'center', alignItems: 'center',
   },
-  adjusterValue: { fontSize: 24, fontFamily: 'Inter_700Bold', color: colors.textPrimary, width: 48, textAlign: 'center' },
+  adjusterValue: { fontSize: 24, fontFamily: 'Inter_700Bold', color: colors.textPrimary, width: 72, textAlign: 'center' },
+  adjusterValueContainer: { alignItems: 'center', width: 72 },
+  adjusterValueInput: {
+    fontSize: 24, fontFamily: 'Inter_700Bold', color: colors.textPrimary,
+    width: 72, textAlign: 'center', padding: 0,
+    borderBottomWidth: 2, borderBottomColor: colors.primary,
+  },
+  unitToggle: {
+    backgroundColor: 'rgba(212,255,0,0.15)', borderRadius: radius.sm,
+    paddingHorizontal: 8, paddingVertical: 3,
+  },
+  unitToggleText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.primary },
+  incrementLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary, marginTop: 2 },
   divider: { height: 1, backgroundColor: 'rgba(212,255,0,0.1)' },
 
   // Done button
