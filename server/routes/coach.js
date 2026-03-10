@@ -9,7 +9,7 @@ function buildSystemPrompt(userContext) {
   const progressionBlock = ctx.progression ? `
 - Progression Status: ${ctx.progression.pushReason || 'On track'}
 - Avg RPE: ${ctx.progression.avgRpe != null ? ctx.progression.avgRpe.toFixed(1) : 'N/A'}
-- Suggested Weight: ${ctx.progression.suggestedWeight || 'N/A'}kg
+- Suggested Weight: ${ctx.progression.suggestedWeight || 'N/A'}${ctx.weightUnit || 'kg'}
 - Plateaued: ${ctx.progression.isPlateaued ? 'Yes' : 'No'}` : '';
 
   const contextBlock = ctx.goal ? `
@@ -19,6 +19,7 @@ Current Context:
 - Equipment: ${ctx.equipment || 'Unknown'}
 - Today's Focus: ${ctx.currentDay?.focus || 'General'}
 - Current Exercise: ${ctx.currentExercise || 'Not started'}
+- Weight Unit: ${ctx.weightUnit || 'kg'}
 - Today's Plan: ${ctx.planSummary || 'No plan loaded'}${progressionBlock}
 ` : '';
 
