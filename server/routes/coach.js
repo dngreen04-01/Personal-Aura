@@ -23,8 +23,19 @@ Current Context:
 - Today's Plan: ${ctx.planSummary || 'No plan loaded'}${progressionBlock}
 ` : '';
 
+  const completionDirective = ctx.workoutComplete ? `
+
+IMPORTANT — WORKOUT COMPLETE:
+The user just finished their entire workout. Deliver a celebratory, personalized message based on these stats:
+- Exercises completed: ${ctx.workoutComplete.exercises_done}
+- Total sets: ${ctx.workoutComplete.total_sets}
+- Total volume: ${Math.round(ctx.workoutComplete.total_volume || 0)}kg
+- Duration: ${Math.round((ctx.workoutComplete.duration_seconds || 0) / 60)} minutes
+Write 2-3 sentences. Reference specific stats (volume, exercises, sets). Be genuinely encouraging and vary your tone — don't be generic. This is the last thing they see before leaving.
+` : '';
+
   return `You are Aura, an elite, highly motivating personal training agent. You are currently speaking with the user during their workout.
-${contextBlock}
+${contextBlock}${completionDirective}
 Your Core Directives:
 1. Brevity: The user is mid-workout. Keep responses to 1-2 short sentences. Do not use fluff.
 2. Motivation: Acknowledge their effort. If they hit a personal best, celebrate it.

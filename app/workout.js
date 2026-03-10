@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, AppState,
-  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
+  TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -10,7 +10,7 @@ import Slider from '@react-native-community/slider';
 import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
 import { sendCoachMessage } from '../lib/api';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 
@@ -59,6 +59,9 @@ export default function WorkoutScreen() {
   const [isEditingWeight, setIsEditingWeight] = useState(false);
   const [weightInputText, setWeightInputText] = useState('');
   const [weightIncrement, setWeightIncrement] = useState(2.5);
+  const [showComplete, setShowComplete] = useState(false);
+  const [completeStats, setCompleteStats] = useState(null);
+  const [completeMessage, setCompleteMessage] = useState(null);
   const inputRef = useRef(null);
   const weightInputRef = useRef(null);
 
@@ -271,7 +274,16 @@ export default function WorkoutScreen() {
         const sid = sessionId;
         pendingAdvanceRef.current = async () => {
           if (sid) await endSession(sid);
-          router.back();
+          const stats = sid ? await getSessionStats(sid) : null;
+          setCompleteStats(stats);
+          setShowComplete(true);
+          // Fire off coach celebration message in background
+          sendCoachMessage('__workout_complete__', [], {
+            goal: userProfile?.goal,
+            equipment: userProfile?.equipment,
+            workoutComplete: stats,
+          }).then(data => setCompleteMessage(data.text))
+            .catch(() => setCompleteMessage('Great work today — you crushed it!'));
         };
       }
     } else {
@@ -580,6 +592,60 @@ export default function WorkoutScreen() {
           <Text style={styles.restPreviewLabel}>NEXT: REST</Text>
         </View>
       )}
+
+      {/* Workout Complete Overlay */}
+      <Modal visible={showComplete} animationType="fade" transparent>
+        <View style={styles.completeOverlay}>
+          <View style={styles.completeCard}>
+            <MaterialIcons name="emoji-events" size={48} color={colors.primary} />
+            <Text style={styles.completeTitle}>WORKOUT COMPLETE</Text>
+
+            {completeStats && (
+              <View style={styles.completeStatsGrid}>
+                <View style={styles.completeStat}>
+                  <Text style={styles.completeStatValue}>{completeStats.exercises_done}</Text>
+                  <Text style={styles.completeStatLabel}>Exercises</Text>
+                </View>
+                <View style={styles.completeStat}>
+                  <Text style={styles.completeStatValue}>{completeStats.total_sets}</Text>
+                  <Text style={styles.completeStatLabel}>Sets</Text>
+                </View>
+                <View style={styles.completeStat}>
+                  <Text style={styles.completeStatValue}>
+                    {completeStats.total_volume >= 1000
+                      ? `${(completeStats.total_volume / 1000).toFixed(1)}k`
+                      : Math.round(completeStats.total_volume || 0)}
+                  </Text>
+                  <Text style={styles.completeStatLabel}>Volume (kg)</Text>
+                </View>
+                <View style={styles.completeStat}>
+                  <Text style={styles.completeStatValue}>
+                    {completeStats.duration_seconds >= 3600
+                      ? `${Math.floor(completeStats.duration_seconds / 3600)}h${Math.floor((completeStats.duration_seconds % 3600) / 60)}m`
+                      : `${Math.round(completeStats.duration_seconds / 60)}m`}
+                  </Text>
+                  <Text style={styles.completeStatLabel}>Duration</Text>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.completeCoachBubble}>
+              {completeMessage ? (
+                <Text style={styles.completeCoachText}>{completeMessage}</Text>
+              ) : (
+                <View style={styles.aiLoadingRow}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.aiLoadingText}>Aura is cheering you on...</Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity style={styles.completeFinishButton} onPress={() => router.back()} activeOpacity={0.85}>
+              <Text style={styles.completeFinishText}>FINISH</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -820,6 +886,56 @@ const styles = StyleSheet.create({
   pushBannerText: {
     fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(34,197,94,0.85)',
     lineHeight: 18,
+  },
+
+  // Completion overlay
+  completeOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)',
+    justifyContent: 'center', alignItems: 'center', padding: spacing.lg,
+  },
+  completeCard: {
+    width: '100%', maxWidth: 360, alignItems: 'center',
+    backgroundColor: colors.bgDarker, borderRadius: radius.xl,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.15)',
+    padding: spacing.xl, gap: spacing.lg,
+  },
+  completeTitle: {
+    fontSize: 22, fontFamily: 'Inter_800ExtraBold', color: colors.primary,
+    letterSpacing: 3,
+  },
+  completeStatsGrid: {
+    flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',
+    gap: spacing.md, width: '100%',
+  },
+  completeStat: {
+    alignItems: 'center', minWidth: 80, padding: spacing.sm,
+    backgroundColor: 'rgba(212,255,0,0.05)', borderRadius: radius.md,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.08)',
+    flex: 1,
+  },
+  completeStatValue: {
+    fontSize: 24, fontFamily: 'Inter_800ExtraBold', color: colors.textPrimary,
+  },
+  completeStatLabel: {
+    fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary,
+    textTransform: 'uppercase', letterSpacing: 1, marginTop: 2,
+  },
+  completeCoachBubble: {
+    width: '100%', backgroundColor: 'rgba(212,255,0,0.08)',
+    borderRadius: radius.md, borderWidth: 1, borderColor: 'rgba(212,255,0,0.15)',
+    padding: spacing.md,
+  },
+  completeCoachText: {
+    fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary,
+    lineHeight: 21, textAlign: 'center',
+  },
+  completeFinishButton: {
+    width: '100%', paddingVertical: 18, borderRadius: radius.lg,
+    backgroundColor: colors.primary, alignItems: 'center',
+  },
+  completeFinishText: {
+    fontSize: 18, fontFamily: 'Inter_800ExtraBold', color: colors.bgDark,
+    letterSpacing: 2,
   },
 
   // Weight badge
