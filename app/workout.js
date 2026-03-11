@@ -7,21 +7,24 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
-import * as Notifications from 'expo-notifications';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
 import { sendCoachMessage } from '../lib/api';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 
-// Show notification even when app is foregrounded
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Lazy-load expo-notifications (not available in Expo Go SDK 53+)
+let Notifications = null;
+try {
+  Notifications = require('expo-notifications');
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+} catch {}
 
 export default function WorkoutScreen() {
   const router = useRouter();
@@ -116,7 +119,7 @@ export default function WorkoutScreen() {
         const id = await startSession(day.day, day.focus);
         setSessionId(id);
       }
-      await Notifications.requestPermissionsAsync();
+      if (Notifications) await Notifications.requestPermissionsAsync();
       try {
         const profile = await getUserProfile();
         setUserProfile(profile);
@@ -127,20 +130,25 @@ export default function WorkoutScreen() {
 
   // Schedule a local notification for when rest ends
   const scheduleRestNotification = async (seconds) => {
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Rest Complete',
-        body: 'Time to hit your next set!',
-        sound: true,
-      },
-      trigger: { type: 'timeInterval', seconds, repeats: false },
-    });
-    restNotifIdRef.current = id;
+    if (!Notifications) return;
+    try {
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Rest Complete',
+          body: 'Time to hit your next set!',
+          sound: true,
+        },
+        trigger: { type: 'timeInterval', seconds, repeats: false },
+      });
+      restNotifIdRef.current = id;
+    } catch {}
   };
 
   const cancelRestNotification = async () => {
-    if (restNotifIdRef.current) {
-      await Notifications.cancelScheduledNotificationAsync(restNotifIdRef.current);
+    if (restNotifIdRef.current && Notifications) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(restNotifIdRef.current);
+      } catch {}
       restNotifIdRef.current = null;
     }
   };
@@ -396,7 +404,7 @@ export default function WorkoutScreen() {
             <View style={styles.adjustCard}>
               {/* Weight adjuster */}
               <View style={styles.adjusterRow}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flex: 1, flexShrink: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 1 }}>
                   <Text style={styles.adjusterLabel} numberOfLines={1}>Weight</Text>
                   <TouchableOpacity
                     style={styles.unitToggle}

@@ -1,30 +1,83 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
-  StyleSheet, KeyboardAvoidingView, Platform,
+  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
+import { sendCoachMessage } from '../lib/api';
+import { getUserProfile } from '../lib/database';
+import SwapExerciseWidget from '../components/SwapExerciseWidget';
 
 export default function WorkoutSummaryScreen() {
   const router = useRouter();
   const { dayJson } = useLocalSearchParams();
   const day = dayJson ? JSON.parse(dayJson) : null;
-  const exercises = day?.exercises || [];
 
+  const [exercises, setExercises] = useState(day?.exercises || []);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  const [inputText, setInputText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [aiResponse, setAiResponse] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
+
+  useEffect(() => {
+    getUserProfile().then(setUserProfile).catch(() => {});
+  }, []);
 
   const totalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
   const estMinutes = Math.max(30, exercises.length * 8);
   const intensity = totalSets > 18 ? 'High' : totalSets > 12 ? 'Medium' : 'Light';
 
+  const handleSend = async () => {
+    const text = inputText.trim();
+    if (!text || isLoading) return;
+
+    setInputText('');
+    setAiResponse(null);
+    setIsLoading(true);
+
+    try {
+      const userContext = {
+        goal: userProfile?.goal,
+        equipment: userProfile?.equipment,
+        currentDay: { ...day, exercises },
+        planSummary: exercises
+          .map(e => `${e.name} ${e.sets}x${e.reps} @ ${e.targetWeight}`)
+          .join(', '),
+      };
+
+      const data = await sendCoachMessage(text, [], userContext);
+      setAiResponse({
+        text: data.text,
+        swapSuggestion: data.swapSuggestion,
+      });
+    } catch (err) {
+      console.error(err);
+      setAiResponse({ text: 'Connection error. Try again.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSwapExercise = (originalExercise, newExerciseName) => {
+    setExercises(prev =>
+      prev.map(ex =>
+        ex.name.toLowerCase() === originalExercise.toLowerCase()
+          ? { ...ex, name: newExerciseName }
+          : ex
+      )
+    );
+    setAiResponse(null);
+  };
+
   const handleStart = () => {
     router.replace({
       pathname: '/workout',
       params: {
-        dayJson: JSON.stringify(day),
+        dayJson: JSON.stringify({ ...day, exercises }),
         startIdx: String(selectedIdx),
       },
     });
@@ -89,6 +142,7 @@ export default function WorkoutSummaryScreen() {
         style={styles.listArea}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {exercises.map((exercise, i) => {
           const isSelected = i === selectedIdx;
@@ -138,11 +192,40 @@ export default function WorkoutSummaryScreen() {
               style={styles.auraPromptInput}
               placeholder="Ask Aura to modify workout..."
               placeholderTextColor={colors.textSecondary}
+              value={inputText}
+              onChangeText={setInputText}
+              onSubmitEditing={handleSend}
+              returnKeyType="send"
             />
-            <TouchableOpacity>
-              <MaterialIcons name="send" size={20} color={colors.primary} />
+            <TouchableOpacity onPress={handleSend} disabled={isLoading}>
+              {isLoading ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <MaterialIcons name="send" size={20} color={colors.primary} />
+              )}
             </TouchableOpacity>
           </View>
+
+          {/* AI Response Area */}
+          {(isLoading || aiResponse) && (
+            <View style={styles.aiResponseContainer}>
+              {isLoading && (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.loadingText}>Aura is thinking...</Text>
+                </View>
+              )}
+              {aiResponse?.text && (
+                <Text style={styles.aiResponseText}>{aiResponse.text}</Text>
+              )}
+              {aiResponse?.swapSuggestion && (
+                <SwapExerciseWidget
+                  swap={aiResponse.swapSuggestion}
+                  onSwap={(newName) => handleSwapExercise(aiResponse.swapSuggestion.original_exercise, newName)}
+                />
+              )}
+            </View>
+          )}
 
           {/* Start CTA */}
           <TouchableOpacity style={styles.startButton} onPress={handleStart} activeOpacity={0.85}>
@@ -237,6 +320,32 @@ const styles = StyleSheet.create({
     flex: 1, color: colors.textPrimary, fontSize: 14, fontFamily: 'Inter_400Regular',
     paddingVertical: spacing.sm,
   },
+
+  // AI Response
+  aiResponseContainer: {
+    backgroundColor: 'rgba(45,49,21,0.5)',
+    borderRadius: radius.md,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.borderSubtle,
+  },
+  aiResponseText: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: colors.textPrimary,
+    lineHeight: 20,
+  },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  loadingText: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    color: colors.textSecondary,
+  },
+
   startButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
     backgroundColor: colors.primary, paddingVertical: 18, borderRadius: radius.lg,
