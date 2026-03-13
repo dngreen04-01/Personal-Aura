@@ -61,7 +61,7 @@ function buildAgentContext(userContext) {
  * for the system prompt. Extracted from orchestrator.js buildSystemPrompt().
  */
 function formatContextBlock(agentContext) {
-  const { user, workout, progression, plan } = agentContext;
+  const { user, workout, location, progression, plan } = agentContext;
 
   if (!user.goal) return '';
 
@@ -79,7 +79,7 @@ Current Context:
 - Today's Focus: ${workout.day || 'General'}
 - Current Exercise: ${workout.currentExercise || 'Not started'}
 - Weight Unit: ${user.weightUnit || 'kg'}
-- Today's Plan: ${plan.summary || 'No plan loaded'}${progressionBlock}
+- Today's Plan: ${plan.summary || 'No plan loaded'}${location?.name ? `\n- Location: ${location.name}${location.equipmentList ? ` (Equipment: ${Array.isArray(location.equipmentList) ? location.equipmentList.join(', ') : location.equipmentList})` : ''}` : ''}${progressionBlock}
 `;
 }
 

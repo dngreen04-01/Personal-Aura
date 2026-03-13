@@ -8,7 +8,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
 import { sendCoachMessage, sendAgentMessage, submitPlanRegeneration } from '../../lib/api';
-import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData } from '../../lib/database';
+import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
 
@@ -25,6 +25,8 @@ export default function ChatScreen() {
   const [userProfile, setUserProfile] = useState(null);
   const [showRegenBanner, setShowRegenBanner] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [locations, setLocations] = useState([]);
+  const [selectedLocation, setSelectedLocation] = useState(null);
 
   useEffect(() => {
     loadPlanAndGreet();
@@ -50,14 +52,18 @@ export default function ChatScreen() {
 
   const loadPlanAndGreet = async () => {
     try {
-      const [savedPlan, profile, sessionCount] = await Promise.all([
+      const [savedPlan, profile, sessionCount, locs, defLoc] = await Promise.all([
         getLatestPlan(),
         getUserProfile(),
         getCompletedSessionCount(),
+        getLocations(),
+        getDefaultLocation(),
       ]);
 
       if (profile) setUserProfile(profile);
       if (sessionCount >= 7) setShowRegenBanner(true);
+      if (locs.length > 0) setLocations(locs);
+      if (defLoc) setSelectedLocation(defLoc);
 
       if (savedPlan && Array.isArray(savedPlan)) {
         setPlan(savedPlan);
@@ -112,6 +118,7 @@ export default function ChatScreen() {
         workout: todayWorkout,
         exercise: { name: currentExName },
         progression,
+        location: selectedLocation,
       });
 
       let data;
@@ -141,7 +148,13 @@ export default function ChatScreen() {
 
   const handleStartWorkout = () => {
     if (todayWorkout) {
-      router.push({ pathname: '/workout-summary', params: { dayJson: JSON.stringify(todayWorkout) } });
+      router.push({
+        pathname: '/workout-summary',
+        params: {
+          dayJson: JSON.stringify(todayWorkout),
+          ...(selectedLocation ? { locationJson: JSON.stringify(selectedLocation) } : {}),
+        },
+      });
     }
   };
 
@@ -298,7 +311,15 @@ export default function ChatScreen() {
 
         {/* Workout Card */}
         {todayWorkout && messages.length >= 2 && (
-          <WorkoutCard day={todayWorkout} onStart={handleStartWorkout} onChangeFocus={handleChangeFocus} />
+          <WorkoutCard
+            day={todayWorkout}
+            onStart={handleStartWorkout}
+            onChangeFocus={handleChangeFocus}
+            locations={locations}
+            selectedLocation={selectedLocation}
+            onLocationChange={setSelectedLocation}
+            onAddLocation={() => router.push('/locations')}
+          />
         )}
 
         {isLoading && (
@@ -363,10 +384,20 @@ function StatPill({ label, value }) {
   );
 }
 
-function WorkoutCard({ day, onStart, onChangeFocus }) {
+function WorkoutCard({ day, onStart, onChangeFocus, locations, selectedLocation, onLocationChange, onAddLocation }) {
   const exercisePreview = day.exercises
     ? day.exercises.slice(0, 3).map(e => e.name).join(', ') + (day.exercises.length > 3 ? '...' : '')
     : '';
+
+  const cycleLocation = () => {
+    if (!locations || locations.length === 0) {
+      onAddLocation();
+      return;
+    }
+    const currentIdx = selectedLocation ? locations.findIndex(l => l.id === selectedLocation.id) : -1;
+    const nextIdx = (currentIdx + 1) % locations.length;
+    onLocationChange(locations[nextIdx]);
+  };
 
   return (
     <View style={styles.workoutCard}>
@@ -393,6 +424,15 @@ function WorkoutCard({ day, onStart, onChangeFocus }) {
             <Text style={styles.cardMetaText}>{day.exercises ? `${day.exercises.length} Exercises` : 'Custom'}</Text>
           </View>
         </View>
+
+        {/* Location Selector */}
+        <TouchableOpacity style={styles.locationPicker} onPress={cycleLocation} activeOpacity={0.7}>
+          <MaterialIcons name="location-on" size={16} color={colors.primary} />
+          <Text style={styles.locationPickerText} numberOfLines={1}>
+            {selectedLocation ? selectedLocation.name : 'Select Location'}
+          </Text>
+          <MaterialIcons name="unfold-more" size={16} color={colors.textMuted} />
+        </TouchableOpacity>
 
         {exercisePreview ? (
           <View style={styles.previewBox}>
@@ -464,6 +504,13 @@ const styles = StyleSheet.create({
   cardMeta: { flexDirection: 'row', gap: spacing.md },
   cardMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   cardMetaText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary },
+  locationPicker: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+    borderRadius: radius.md, backgroundColor: 'rgba(212,255,0,0.05)',
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.1)',
+  },
+  locationPickerText: { flex: 1, fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textPrimary },
   previewBox: { backgroundColor: colors.primaryGhost, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primaryGhost },
   previewLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.textMuted, letterSpacing: 2, marginBottom: 4 },
   previewText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic' },

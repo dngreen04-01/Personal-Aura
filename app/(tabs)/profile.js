@@ -4,11 +4,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius } from '../../lib/theme';
 import { useRouter } from 'expo-router';
-import { getUserProfile, resetDatabase } from '../../lib/database';
+import { getUserProfile, getLocations, resetDatabase } from '../../lib/database';
 
 export default function ProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState(null);
+  const [locationCount, setLocationCount] = useState(0);
 
   useEffect(() => {
     loadProfile();
@@ -16,8 +17,9 @@ export default function ProfileScreen() {
 
   const loadProfile = async () => {
     try {
-      const p = await getUserProfile();
+      const [p, locs] = await Promise.all([getUserProfile(), getLocations()]);
       setProfile(p);
+      setLocationCount(locs.length);
     } catch (e) {
       console.error(e);
     }
@@ -41,6 +43,16 @@ export default function ProfileScreen() {
           <View style={styles.infoCards}>
             <InfoCard icon="flag" label="Goal" value={profile.goal} />
             <InfoCard icon="fitness-center" label="Equipment" value={profile.equipment?.replace('_', ' ')} />
+            <TouchableOpacity onPress={() => router.push('/locations')}>
+              <View style={styles.card}>
+                <MaterialIcons name="location-on" size={20} color={colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardLabel}>Locations</Text>
+                  <Text style={styles.cardValue}>{locationCount} saved</Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={20} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
             {profile.age && <InfoCard icon="cake" label="Age / Weight" value={`${profile.age}yo, ${profile.weight_kg}kg`} />}
             {profile.gender && <InfoCard icon="person" label="Gender" value={profile.gender} />}
           </View>

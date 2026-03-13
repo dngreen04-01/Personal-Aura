@@ -8,7 +8,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
 import { generatePlan } from '../lib/api';
-import { saveUserProfile, saveWorkoutPlan } from '../lib/database';
+import { saveUserProfile, saveWorkoutPlan, saveLocation } from '../lib/database';
 
 const GOALS = [
   { id: 'build_muscle', label: 'Build Muscle', icon: 'fitness-center' },
@@ -63,6 +63,7 @@ export default function OnboardingScreen() {
   ]);
   const [selectedGoal, setSelectedGoal] = useState(null);
   const [selectedEquipment, setSelectedEquipment] = useState(null);
+  const [locationName, setLocationNameState] = useState('My Gym');
   const [bodyStats, setBodyStats] = useState({ age: '', weight: '', gender: 'Male' });
   const [baselines, setBaselines] = useState({});
   const [schedule, setSchedule] = useState({ daysPerWeek: 4, minutesPerSession: 60 });
@@ -89,6 +90,14 @@ export default function OnboardingScreen() {
     setSelectedEquipment(equip.id);
     addMessages(
       { role: 'user', text: equip.label },
+      { role: 'aura', text: "What should we call your training location? This helps me tailor exercise suggestions to your equipment.", widgetType: 'locationName' },
+    );
+    setCurrentStep('locationName');
+  };
+
+  const handleLocationNameSubmit = () => {
+    addMessages(
+      { role: 'user', text: locationName },
       { role: 'aura', text: "To tailor your training volume, I'll need your basic stats: Age, Weight, and Gender.", widgetType: 'bodyStats' },
     );
     setCurrentStep('bodyStats');
@@ -157,6 +166,15 @@ export default function OnboardingScreen() {
       }, schedule);
       await saveWorkoutPlan(data.plan);
 
+      // Create initial default location based on equipment choice
+      const equipmentMap = {
+        commercial_gym: ['barbell', 'dumbbells', 'ez_curl_bar', 'kettlebells', 'cable_machine', 'smith_machine', 'leg_press', 'lat_pulldown', 'chest_press', 'leg_curl', 'leg_extension', 'pull_up_bar', 'dip_bars', 'bench'],
+        home_gym: ['dumbbells', 'bench', 'resistance_bands'],
+        bodyweight_only: ['pull_up_bar'],
+      };
+      const equipmentList = equipmentMap[selectedEquipment] || ['dumbbells'];
+      await saveLocation(locationName.trim() || 'My Gym', equipmentList, true);
+
       router.replace('/(tabs)');
     } catch (err) {
       console.error(err);
@@ -202,6 +220,9 @@ export default function OnboardingScreen() {
                 onGoalSelect={handleGoalSelect}
                 onEquipmentSelect={handleEquipmentSelect}
                 selectedEquipment={selectedEquipment}
+                locationNameValue={locationName}
+                setLocationNameValue={setLocationNameState}
+                onLocationNameSubmit={handleLocationNameSubmit}
                 bodyStats={bodyStats}
                 setBodyStats={setBodyStats}
                 onBodyStatsSubmit={handleBodyStatsSubmit}
@@ -251,6 +272,7 @@ export default function OnboardingScreen() {
 
 function AuraMessage({
   text, widgetType, currentStep, onGoalSelect, onEquipmentSelect, selectedEquipment,
+  locationNameValue, setLocationNameValue, onLocationNameSubmit,
   bodyStats, setBodyStats, onBodyStatsSubmit,
   schedule, setSchedule, onScheduleSubmit,
   assessmentExercises, baselines, setBaselines, onFinishAssessment,
@@ -291,6 +313,22 @@ function AuraMessage({
                 ]}>{equip.label}</Text>
               </TouchableOpacity>
             ))}
+          </View>
+        )}
+
+        {widgetType === 'locationName' && currentStep === 'locationName' && (
+          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+            <TextInput
+              style={styles.statsInput}
+              placeholder="My Gym"
+              placeholderTextColor={colors.textMuted}
+              value={locationNameValue}
+              onChangeText={setLocationNameValue}
+              autoFocus
+            />
+            <TouchableOpacity style={styles.continueButton} onPress={onLocationNameSubmit}>
+              <Text style={styles.continueButtonText}>Continue</Text>
+            </TouchableOpacity>
           </View>
         )}
 

@@ -29,8 +29,9 @@ try {
 
 export default function WorkoutScreen() {
   const router = useRouter();
-  const { dayJson, startIdx } = useLocalSearchParams();
+  const { dayJson, startIdx, locationJson } = useLocalSearchParams();
   const day = dayJson ? JSON.parse(dayJson) : null;
+  const location = locationJson ? JSON.parse(locationJson) : null;
 
   const [sessionId, setSessionId] = useState(null);
   const [currentExIdx, setCurrentExIdx] = useState(parseInt(startIdx) || 0);
@@ -117,7 +118,7 @@ export default function WorkoutScreen() {
   useEffect(() => {
     const init = async () => {
       if (day) {
-        const id = await startSession(day.day, day.focus, null);
+        const id = await startSession(day.day, day.focus, location?.id || null);
         setSessionId(id);
       }
       if (Notifications) await Notifications.requestPermissionsAsync();
@@ -224,6 +225,7 @@ export default function WorkoutScreen() {
           weightUnit,
           isResting,
         },
+        location,
       });
       let data;
       try {
@@ -297,6 +299,7 @@ export default function WorkoutScreen() {
           const completeCtx = buildUserContext({
             profile: userProfile,
             completion: stats,
+            location,
           });
           sendAgentMessage('__workout_complete__', [], completeCtx)
             .catch(() => sendCoachMessage('__workout_complete__', [], completeCtx))
@@ -347,7 +350,7 @@ export default function WorkoutScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>{currentExercise.name}</Text>
-          <Text style={styles.headerSub}>SET {currentSet} OF {totalSets}</Text>
+          <Text style={styles.headerSub}>SET {currentSet} OF {totalSets}{location?.name ? ` \u00B7 ${location.name}` : ''}</Text>
         </View>
         <TouchableOpacity style={styles.headerSide}>
           <View style={styles.settingsButton}>

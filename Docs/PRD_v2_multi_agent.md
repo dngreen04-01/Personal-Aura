@@ -432,35 +432,69 @@ Each milestone is scoped to be completable in a single coding session (2-4 hours
 
 ---
 
-### Milestone 3: Location Manager UI
+### Milestone 3: Location Manager UI ✅ COMPLETE (2026-03-14)
 
 **Goal:** Build the location management screen and integrate location selection into the workout flow.
 
+**Status:** Implemented and verified. Location Manager screen created, location selection wired into full workout flow (chat → summary → workout), onboarding creates initial location, and agent context includes location info in system prompt.
+
 **Frontend tasks:**
-1. Create `app/locations.js` — Location manager screen:
-   - List saved locations with equipment summaries
-   - Add new location: name input + equipment checklist (categorized: barbells, dumbbells, machines, cables, bodyweight, etc.)
-   - Edit existing location
-   - Delete location with confirmation
+1. ✅ Created `app/locations.js` — Full CRUD Location Manager screen:
+   - List saved locations as cards with equipment summaries and default badge
+   - Add/edit via bottom sheet Modal with name input + categorized equipment checklist (3 categories: Free Weights, Machines, Bodyweight & Other — 16 equipment items total)
+   - Delete with confirmation Alert
    - Set default location toggle
-2. Add navigation to Location Manager from Profile tab (`app/(tabs)/profile.js`)
-3. Add location selector to Chat screen (`app/(tabs)/index.js`):
-   - Dropdown or bottom sheet before "Start Workout"
-   - Shows saved locations + "Add New" option
-   - Selected location passed to workout context
-4. Update `app/workout.js` to display current location name in header
-5. Update onboarding flow (`app/onboarding.js`) to create initial location from equipment selection:
-   - After equipment step, prompt for location name (default: "My Gym")
-   - Save as first location entry
+   - Empty state with guidance text
+2. ✅ Added navigation to Location Manager from Profile tab (`app/(tabs)/profile.js`):
+   - New "Locations" row between Equipment and dev reset button
+   - Shows count (e.g. "3 saved") with chevron-right arrow
+   - Loads location count on mount via `getLocations()`
+3. ✅ Added location selector to Chat screen (`app/(tabs)/index.js`):
+   - Compact inline picker in WorkoutCard (above "Start Workout" button)
+   - Shows current location name with location-on icon and unfold-more icon
+   - Tapping cycles through saved locations
+   - If no locations, tapping navigates to `/locations`
+   - Loads locations + default location on mount
+   - Passes `locationJson` to workout-summary params
+   - Passes `location` to `buildUserContext()` in `handleSend`
+4. ✅ Updated `app/workout.js`:
+   - Parses `locationJson` from route params
+   - Passes `location.id` to `startSession()` (was `null`)
+   - Shows location name in header subtitle (e.g. "SET 1 OF 4 · Planet Fitness")
+   - Passes `location` to all 3 `buildUserContext()` calls (chat, workout-complete)
+5. ✅ Updated onboarding flow (`app/onboarding.js`):
+   - Added new `locationName` step between equipment and bodyStats
+   - Simple TextInput defaulting to "My Gym"
+   - Equipment ID mapping: `commercial_gym` → 14 items, `home_gym` → 3 items, `bodyweight_only` → 1 item
+   - Calls `saveLocation(name, equipmentList, true)` in `handleFinishAssessment`
+6. ✅ Updated `app/workout-summary.js`:
+   - Receives and parses `locationJson` from route params
+   - Passes `location` to `buildUserContext()` for AI context
+   - Forwards `locationJson` when navigating to workout screen
 
 **Backend tasks:**
-6. Update `server/agents/memory.js` `buildAgentContext` to include resolved equipment list from location
+7. ✅ Updated `lib/contextBuilder.js` — Added `locationName: location?.name || null` to output; fixed `equipment_list` handling to support both pre-parsed arrays and JSON strings
+8. ✅ Updated `server/agents/memory.js` — `formatContextBlock()` now includes location line: `- Location: {name} (Equipment: {list})` when location data is present
+
+**Implementation discoveries:**
+- Location selector uses cycle-through pattern (tap to advance) rather than dropdown/bottom sheet — simpler, no extra library needed, consistent with the compact WorkoutCard layout
+- `getLocations()` and `getDefaultLocation()` in `lib/database.js` already parse `equipment_list` from JSON string to array, so `contextBuilder.js` needed a guard (`Array.isArray` check) to avoid double-parsing — this was a latent bug in the Milestone 2 code that only surfaced now that locations are actually being passed
+- `workout-summary.js` also needed location integration (receives and forwards `locationJson`) — same pattern as the Milestone 1 discovery where this screen was initially missed
+- Equipment mapping for onboarding: `commercial_gym` maps to the full 14-item set from the EQUIPMENT_CATEGORIES constant, `home_gym` to `["dumbbells", "bench", "resistance_bands"]`, `bodyweight_only` to `["pull_up_bar"]`
+- The location is forwarded through the flow as serialized JSON in route params (`locationJson`), consistent with the existing `dayJson` pattern
+- `memory.js` `formatContextBlock()` now destructures `location` alongside `user, workout, progression, plan` and conditionally appends the location line — only when `location.name` is present, so old flows without location still work
 
 **Validation:**
-- User can create, edit, delete locations with equipment profiles
-- Location selection flows into workout session
-- Onboarding creates initial location
-- Agent context includes equipment from selected location
+- ✅ `app/locations.js` renders, creates, edits, deletes locations with equipment profiles
+- ✅ Profile screen shows "Locations" row with count, navigates to `/locations`
+- ✅ Onboarding creates initial default location with equipment mapping on plan generation
+- ✅ Chat screen shows location selector in WorkoutCard; cycling through locations works
+- ✅ Selected location flows: chat → workout-summary → workout screen
+- ✅ Workout screen header shows location name (e.g. "SET 1 OF 4 · My Gym")
+- ✅ `startSession()` receives non-null `locationId` when location is selected
+- ✅ Agent context includes location info in "Current Context:" block
+- ✅ Old flows still work if no location is selected (null fallback throughout)
+- ✅ Metro bundler compiles all files without errors (verified via `expo export`)
 
 ---
 

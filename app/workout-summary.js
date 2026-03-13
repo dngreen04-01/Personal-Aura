@@ -14,8 +14,9 @@ import SwapExerciseWidget from '../components/SwapExerciseWidget';
 
 export default function WorkoutSummaryScreen() {
   const router = useRouter();
-  const { dayJson } = useLocalSearchParams();
+  const { dayJson, locationJson } = useLocalSearchParams();
   const day = dayJson ? JSON.parse(dayJson) : null;
+  const location = locationJson ? JSON.parse(locationJson) : null;
 
   const [exercises, setExercises] = useState(day?.exercises || []);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -44,6 +45,7 @@ export default function WorkoutSummaryScreen() {
       const userContext = buildUserContext({
         profile: userProfile,
         workout: { ...day, exercises },
+        location,
       });
 
       let data;
@@ -82,6 +84,7 @@ export default function WorkoutSummaryScreen() {
       params: {
         dayJson: JSON.stringify({ ...day, exercises }),
         startIdx: String(selectedIdx),
+        ...(locationJson ? { locationJson } : {}),
       },
     });
   };
