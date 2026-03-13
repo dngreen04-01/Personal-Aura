@@ -7,7 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
-import { sendCoachMessage } from '../lib/api';
+import { sendCoachMessage, sendAgentMessage } from '../lib/api';
 import { getUserProfile } from '../lib/database';
 import SwapExerciseWidget from '../components/SwapExerciseWidget';
 
@@ -49,7 +49,13 @@ export default function WorkoutSummaryScreen() {
           .join(', '),
       };
 
-      const data = await sendCoachMessage(text, [], userContext);
+      let data;
+      try {
+        data = await sendAgentMessage(text, [], userContext);
+      } catch (agentErr) {
+        console.warn('Agent endpoint failed, falling back to coach:', agentErr.message);
+        data = await sendCoachMessage(text, [], userContext);
+      }
       setAiResponse({
         text: data.text,
         swapSuggestion: data.swapSuggestion,

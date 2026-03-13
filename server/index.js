@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 
 const coachRouter = require('./routes/coach');
+const agentRouter = require('./routes/agent');
 const onboardingRouter = require('./routes/onboarding');
 const progressRouter = require('./routes/progress');
 const programmerRouter = require('./routes/programmer');
@@ -18,6 +19,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/coach', coachRouter);
+app.use('/api/agent', agentRouter);
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api/progress', progressRouter);
 app.use('/api/programmer', programmerRouter);

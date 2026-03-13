@@ -344,28 +344,40 @@ Each milestone is scoped to be completable in a single coding session (2-4 hours
 
 ---
 
-### Milestone 1: Agent Router Foundation
+### Milestone 1: Agent Router Foundation ✅ COMPLETE (2026-03-14)
 
 **Goal:** Create the backend agent infrastructure and unified endpoint without changing any AI behavior. The current coach logic moves into the Orchestrator agent unchanged.
 
+**Status:** Implemented and verified. All modules load cleanly. Both endpoints call the same `handleMessage()`.
+
 **Backend tasks:**
-1. Create `server/agents/` directory structure:
-   - `server/agents/router.js` — Agent router: parses request, calls Orchestrator, returns response
-   - `server/agents/orchestrator.js` — Move existing `/api/coach` logic here as-is
-   - `server/agents/types.js` — Shared types/constants for agent communication
-2. Create `POST /api/agent` endpoint in `server/routes/agent.js` that delegates to the router
-3. Add `agent_interactions` table migration to `lib/database.js`
-4. Wire up the new route in `server/index.js`
+1. ✅ Create `server/agents/` directory structure:
+   - `server/agents/types.js` — `AGENTS` enum, `buildAgentResponse()`, `logInteraction()` (structured JSON for Cloud Run)
+   - `server/agents/orchestrator.js` — Extracted `handleMessage()` from `coach.js` (lines 5-168 → standalone async function)
+   - `server/agents/router.js` — `routeRequest()` dispatches to orchestrator, tracks latency, logs via `logInteraction()`
+2. ✅ Create `POST /api/agent` endpoint in `server/routes/agent.js` — validates `message` exists, delegates to router
+3. ✅ Add `agent_interactions` table + `saveAgentInteraction()` export to `lib/database.js`
+4. ✅ Wire up in `server/index.js` — `app.use('/api/agent', agentRouter)`
 
 **Frontend tasks:**
-5. Add `sendAgentMessage()` to `lib/api.js` (same request shape as `sendCoachMessage` but hits `/api/agent`)
-6. Update `app/(tabs)/index.js` to use `sendAgentMessage` with fallback to `sendCoachMessage`
-7. Update `app/workout.js` to use `sendAgentMessage` with fallback
+5. ✅ Add `sendAgentMessage()` to `lib/api.js` — includes 90s abort timeout (matching `generatePlan` pattern)
+6. ✅ Update `app/(tabs)/index.js` — try/catch with fallback to `sendCoachMessage`
+7. ✅ Update `app/workout.js` — both inline chat (line 226) and fire-and-forget completion message (line 289) use agent with fallback
+8. ✅ Update `app/workout-summary.js` — same try/fallback pattern (not in original PRD, discovered during implementation)
+
+**Implementation discoveries:**
+- `server/routes/coach.js` reduced from 172 lines to 16 lines (thin wrapper calling `orchestrator.handleMessage()`)
+- `workout-summary.js` also calls `sendCoachMessage` (line 52) — added to scope since it was missed in original PRD
+- Agent response is a superset: adds `agentsUsed` and `latency` fields. Frontend callers only destructure `text`, `functionCall`, `swapSuggestion` so extra fields are safely ignored
+- Server-side interaction logging uses `process.nextTick()` + `console.log(JSON.stringify(...))` for non-blocking structured logging (Cloud Run parses JSON logs automatically)
+- `sendAgentMessage` uses 90s AbortController timeout (matching existing `generatePlan` pattern), while `sendCoachMessage` has no timeout — this is intentional as the agent endpoint may orchestrate multiple agents in future milestones
 
 **Validation:**
-- Chat works identically to before via new endpoint
-- Old `/api/coach` endpoint still works (no breaking change)
-- `agent_interactions` table logs each request
+- ✅ All server modules load without error (`node -e "require('./server/agents/...')"`)
+- ✅ Old `/api/coach` endpoint still works (thin wrapper, same `handleMessage()`)
+- ✅ New `/api/agent` endpoint returns superset response with `agentsUsed` and `latency`
+- ✅ Frontend falls back transparently if `/api/agent` is unavailable
+- ✅ `agent_interactions` table created in SQLite on app launch
 
 **No AI behavior changes in this milestone.**
 

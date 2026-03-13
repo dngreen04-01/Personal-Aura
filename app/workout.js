@@ -10,7 +10,7 @@ import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
-import { sendCoachMessage } from '../lib/api';
+import { sendCoachMessage, sendAgentMessage } from '../lib/api';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 
 // Lazy-load expo-notifications (not available in Expo Go SDK 53+)
@@ -223,7 +223,13 @@ export default function WorkoutScreen() {
         weightUnit,
         isResting,
       };
-      const data = await sendCoachMessage(text, [], userContext);
+      let data;
+      try {
+        data = await sendAgentMessage(text, [], userContext);
+      } catch (agentErr) {
+        console.warn('Agent endpoint failed, falling back to coach:', agentErr.message);
+        data = await sendCoachMessage(text, [], userContext);
+      }
       setAiResponse({ text: data.text });
     } catch {
       setAiResponse({ text: 'Connection error — keep pushing!' });
@@ -285,12 +291,18 @@ export default function WorkoutScreen() {
           const stats = sid ? await getSessionStats(sid) : null;
           setCompleteStats(stats);
           setShowComplete(true);
-          // Fire off coach celebration message in background
-          sendCoachMessage('__workout_complete__', [], {
+          // Fire off agent celebration message in background (fallback to coach)
+          sendAgentMessage('__workout_complete__', [], {
             goal: userProfile?.goal,
             equipment: userProfile?.equipment,
             workoutComplete: stats,
-          }).then(data => setCompleteMessage(data.text))
+          })
+            .catch(() => sendCoachMessage('__workout_complete__', [], {
+              goal: userProfile?.goal,
+              equipment: userProfile?.equipment,
+              workoutComplete: stats,
+            }))
+            .then(data => setCompleteMessage(data.text))
             .catch(() => setCompleteMessage('Great work today — you crushed it!'));
         };
       }

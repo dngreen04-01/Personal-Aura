@@ -7,7 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
-import { sendCoachMessage, submitPlanRegeneration } from '../../lib/api';
+import { sendCoachMessage, sendAgentMessage, submitPlanRegeneration } from '../../lib/api';
 import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData } from '../../lib/database';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
 
@@ -122,7 +122,13 @@ export default function ChatScreen() {
         } : null,
       };
 
-      const data = await sendCoachMessage(text, history, userContext);
+      let data;
+      try {
+        data = await sendAgentMessage(text, history, userContext);
+      } catch (agentErr) {
+        console.warn('Agent endpoint failed, falling back to coach:', agentErr.message);
+        data = await sendCoachMessage(text, history, userContext);
+      }
 
       setMessages(prev => [
         ...prev,
