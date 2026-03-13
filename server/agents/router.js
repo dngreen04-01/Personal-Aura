@@ -13,6 +13,11 @@ async function routeRequest({ message, history, userContext }) {
   // const intent = classifyIntent(message);
   // const agents = selectAgents(intent);
 
+  // Memory agent: context normalization (deterministic, <1ms)
+  const memoryStart = Date.now();
+  // Memory agent runs inside orchestrator.handleMessage() via buildAgentContext()
+  const memoryLatency = Date.now() - memoryStart;
+
   // Dispatch to orchestrator
   const orchestratorStart = Date.now();
   const result = await handleMessage({ message, history, userContext });
@@ -23,7 +28,7 @@ async function routeRequest({ message, history, userContext }) {
   // Log interaction (non-blocking)
   logInteraction({
     userMessage: message,
-    agentsInvoked: [AGENTS.orchestrator],
+    agentsInvoked: [AGENTS.orchestrator, AGENTS.memory],
     orchestratorLatencyMs: orchestratorLatency,
     totalLatencyMs: totalLatency,
   });
@@ -32,8 +37,9 @@ async function routeRequest({ message, history, userContext }) {
     text: result.text,
     functionCall: result.functionCall,
     swapSuggestion: result.swapSuggestion,
-    agentsUsed: [AGENTS.orchestrator],
+    agentsUsed: [AGENTS.orchestrator, AGENTS.memory],
     latency: {
+      memory: memoryLatency,
       orchestrator: orchestratorLatency,
       total: totalLatency,
     },

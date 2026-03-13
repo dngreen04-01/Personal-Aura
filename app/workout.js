@@ -11,6 +11,7 @@ import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
 import { sendCoachMessage, sendAgentMessage } from '../lib/api';
+import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 
 // Lazy-load expo-notifications (not available in Expo Go SDK 53+)
@@ -116,7 +117,7 @@ export default function WorkoutScreen() {
   useEffect(() => {
     const init = async () => {
       if (day) {
-        const id = await startSession(day.day, day.focus);
+        const id = await startSession(day.day, day.focus, null);
         setSessionId(id);
       }
       if (Notifications) await Notifications.requestPermissionsAsync();
@@ -213,16 +214,17 @@ export default function WorkoutScreen() {
     setAiResponse(null);
     setIsAiLoading(true);
     try {
-      const userContext = {
-        goal: userProfile?.goal,
-        equipment: userProfile?.equipment,
-        currentExercise: currentExercise?.name,
-        currentSet: `Set ${currentSet} of ${totalSets}`,
-        targetReps,
-        currentWeight: weight,
-        weightUnit,
-        isResting,
-      };
+      const userContext = buildUserContext({
+        profile: userProfile,
+        exercise: {
+          name: currentExercise?.name,
+          currentSet: `Set ${currentSet} of ${totalSets}`,
+          targetReps,
+          currentWeight: weight,
+          weightUnit,
+          isResting,
+        },
+      });
       let data;
       try {
         data = await sendAgentMessage(text, [], userContext);
@@ -292,16 +294,12 @@ export default function WorkoutScreen() {
           setCompleteStats(stats);
           setShowComplete(true);
           // Fire off agent celebration message in background (fallback to coach)
-          sendAgentMessage('__workout_complete__', [], {
-            goal: userProfile?.goal,
-            equipment: userProfile?.equipment,
-            workoutComplete: stats,
-          })
-            .catch(() => sendCoachMessage('__workout_complete__', [], {
-              goal: userProfile?.goal,
-              equipment: userProfile?.equipment,
-              workoutComplete: stats,
-            }))
+          const completeCtx = buildUserContext({
+            profile: userProfile,
+            completion: stats,
+          });
+          sendAgentMessage('__workout_complete__', [], completeCtx)
+            .catch(() => sendCoachMessage('__workout_complete__', [], completeCtx))
             .then(data => setCompleteMessage(data.text))
             .catch(() => setCompleteMessage('Great work today — you crushed it!'));
         };

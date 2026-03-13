@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
 import { sendCoachMessage, sendAgentMessage } from '../lib/api';
 import { getUserProfile } from '../lib/database';
+import { buildUserContext } from '../lib/contextBuilder';
 import SwapExerciseWidget from '../components/SwapExerciseWidget';
 
 export default function WorkoutSummaryScreen() {
@@ -40,14 +41,10 @@ export default function WorkoutSummaryScreen() {
     setIsLoading(true);
 
     try {
-      const userContext = {
-        goal: userProfile?.goal,
-        equipment: userProfile?.equipment,
-        currentDay: { ...day, exercises },
-        planSummary: exercises
-          .map(e => `${e.name} ${e.sets}x${e.reps} @ ${e.targetWeight}`)
-          .join(', '),
-      };
+      const userContext = buildUserContext({
+        profile: userProfile,
+        workout: { ...day, exercises },
+      });
 
       let data;
       try {

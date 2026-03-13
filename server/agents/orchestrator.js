@@ -1,36 +1,11 @@
 const { GoogleGenAI } = require('@google/genai');
+const { buildAgentContext, formatContextBlock, formatCompletionDirective } = require('./memory');
 
 const MODEL_NAME = 'gemini-3.1-flash-lite-preview';
 
-function buildSystemPrompt(userContext) {
-  const ctx = userContext || {};
-  const progressionBlock = ctx.progression ? `
-- Progression Status: ${ctx.progression.pushReason || 'On track'}
-- Avg RPE: ${ctx.progression.avgRpe != null ? ctx.progression.avgRpe.toFixed(1) : 'N/A'}
-- Suggested Weight: ${ctx.progression.suggestedWeight || 'N/A'}${ctx.weightUnit || 'kg'}
-- Plateaued: ${ctx.progression.isPlateaued ? 'Yes' : 'No'}` : '';
-
-  const contextBlock = ctx.goal ? `
-
-Current Context:
-- User Goal: ${ctx.goal}
-- Equipment: ${ctx.equipment || 'Unknown'}
-- Today's Focus: ${ctx.currentDay?.focus || 'General'}
-- Current Exercise: ${ctx.currentExercise || 'Not started'}
-- Weight Unit: ${ctx.weightUnit || 'kg'}
-- Today's Plan: ${ctx.planSummary || 'No plan loaded'}${progressionBlock}
-` : '';
-
-  const completionDirective = ctx.workoutComplete ? `
-
-IMPORTANT — WORKOUT COMPLETE:
-The user just finished their entire workout. Deliver a celebratory, personalized message based on these stats:
-- Exercises completed: ${ctx.workoutComplete.exercises_done}
-- Total sets: ${ctx.workoutComplete.total_sets}
-- Total volume: ${Math.round(ctx.workoutComplete.total_volume || 0)}kg
-- Duration: ${Math.round((ctx.workoutComplete.duration_seconds || 0) / 60)} minutes
-Write 2-3 sentences. Reference specific stats (volume, exercises, sets). Be genuinely encouraging and vary your tone — don't be generic. This is the last thing they see before leaving.
-` : '';
+function buildSystemPrompt(agentContext) {
+  const contextBlock = formatContextBlock(agentContext);
+  const completionDirective = formatCompletionDirective(agentContext);
 
   return `You are Aura, an elite, highly motivating personal training agent. You are currently speaking with the user during their workout.
 ${contextBlock}${completionDirective}
@@ -99,6 +74,9 @@ async function handleMessage({ message, history, userContext }) {
     throw new Error('GEMINI_API_KEY missing');
   }
 
+  // Normalize context through memory agent
+  const agentContext = buildAgentContext(userContext);
+
   let validHistory = history || [];
   if (validHistory.length > 0 && validHistory[0].role === 'model') {
     validHistory = [
@@ -112,7 +90,7 @@ async function handleMessage({ message, history, userContext }) {
   const chat = ai.chats.create({
     model: MODEL_NAME,
     config: {
-      systemInstruction: buildSystemPrompt(userContext),
+      systemInstruction: buildSystemPrompt(agentContext),
       tools: [{ functionDeclarations: [logSetDeclaration, suggestSwapDeclaration] }],
     },
     history: validHistory,

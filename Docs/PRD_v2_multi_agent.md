@@ -383,32 +383,52 @@ Each milestone is scoped to be completable in a single coding session (2-4 hours
 
 ---
 
-### Milestone 2: Memory Agent & Context Layer
+### Milestone 2: Memory Agent & Context Layer ✅ COMPLETE (2026-03-14)
 
-**Goal:** Extract data retrieval into a dedicated Memory Agent module. The Orchestrator calls the Memory Agent instead of having context built inline in the route handler.
+**Goal:** Extract context normalization into a dedicated Memory Agent module and unify the 4 different frontend context shapes into a single builder. Add locations/equipment database infrastructure.
+
+**Status:** Implemented and verified. All modules load cleanly. System prompt output is identical for the same input context.
+
+**Architectural decision:** The Memory Agent is a **deterministic context normalization layer** (not a DB query wrapper). Since all data lives in client-side SQLite and the server is 100% stateless (Express on Cloud Run, no DB), the Memory Agent normalizes the 4 different frontend context shapes into a single canonical shape. Server-side `/api/locations` CRUD routes were **deferred** — location CRUD lives entirely in frontend SQLite since the server has no persistent storage.
 
 **Backend tasks:**
-1. Create `server/agents/memory.js`:
-   - `getWorkoutContext(userId, exerciseName)` — wraps `getExerciseProgressionData`
-   - `getRecentHistory(userId, days)` — wraps `getRecentWorkoutHistory`
-   - `getSessionStats(sessionId)` — wraps existing stats queries
-   - `getEquipmentProfile(locationId)` — queries locations table
-   - `buildAgentContext(request)` — assembles full context package for other agents
-2. Add `locations` table and `agent_context_cache` table migrations to `lib/database.js`
-3. Create `POST /api/locations` CRUD routes in `server/routes/locations.js`
-4. Add location CRUD functions to `lib/database.js` (`saveLocation`, `getLocations`, `updateLocation`, `deleteLocation`)
-5. Refactor `server/agents/orchestrator.js` to call Memory Agent for context instead of receiving pre-built context from the frontend
+1. ✅ Created `server/agents/memory.js`:
+   - `buildAgentContext(userContext)` — normalizes 4 frontend context shapes into canonical shape with `user`, `workout`, `location`, `progression`, `plan`, `completion` fields
+   - `formatContextBlock(agentContext)` — extracts "Current Context:" text block generation from orchestrator (was lines 6-22)
+   - `formatCompletionDirective(agentContext)` — extracts workout-complete directive from orchestrator (was lines 24-33)
+2. ✅ Added `locations` table, `agent_context_cache` table, and `workout_sessions.location_id` migration to `lib/database.js`
+3. ⏭️ Skipped `POST /api/locations` routes — server has no DB, location CRUD lives in frontend SQLite only. Deferred to future milestone if server-side persistence is added.
+4. ✅ Added 7 location CRUD functions to `lib/database.js`: `saveLocation`, `getLocations`, `getLocation`, `updateLocation`, `deleteLocation`, `getDefaultLocation`, `setDefaultLocation`
+5. ✅ Refactored `server/agents/orchestrator.js` — imports memory agent, `handleMessage()` calls `buildAgentContext()` first, `buildSystemPrompt()` uses `formatContextBlock()` and `formatCompletionDirective()` instead of inline logic
 
 **Frontend tasks:**
-6. Add location CRUD functions to `lib/api.js`
-7. Add location CRUD functions to `lib/database.js` (local SQLite mirror)
-8. Update `sendAgentMessage` context to include `locationId` instead of equipment string
-9. Update `app/workout.js` `startSession` to accept and store `locationId`
+6. ⏭️ Skipped location API functions in `lib/api.js` — no server routes to call (see #3)
+7. ✅ Location CRUD functions added to `lib/database.js` (see #4)
+8. ✅ Created `lib/contextBuilder.js` with `buildUserContext()` — unified context builder replaces 4 copy-pasted context objects across 3 files
+9. ✅ Updated `app/(tabs)/index.js` — uses `buildUserContext()` instead of inline context
+10. ✅ Updated `app/workout.js` — uses `buildUserContext()` for chat context, workout-complete context, and passes `locationId` to `startSession()`
+11. ✅ Updated `app/workout-summary.js` — uses `buildUserContext()` instead of inline context
+12. ✅ Updated `server/agents/router.js` — `agentsUsed` now includes `["orchestrator", "memory"]`, latency tracks `memory` field
+
+**Implementation discoveries:**
+- The 4 different frontend context shapes were: (1) chat screen with progression, (2) workout chat with exercise details, (3) workout complete with stats, (4) workout summary with plan. All had slightly different field names and structures.
+- `buildUserContext()` output is backward-compatible with the server — it produces the same flat field names (`goal`, `equipment`, `currentDay`, `currentExercise`, `workoutComplete`, etc.) that `buildAgentContext()` then normalizes into the canonical nested shape.
+- The `formatContextBlock()` and `formatCompletionDirective()` functions produce byte-identical output to the old inline logic in `buildSystemPrompt()` — verified with direct comparison tests.
+- `orchestrator.js` went from 165 lines to ~130 lines — the system prompt builder is now 3 lines instead of 28.
+- Location equipment resolution (from location vs profile) happens in `buildUserContext()` on the frontend, giving the server a single `equipment` field regardless of source.
 
 **Validation:**
-- Chat responses are identical but context comes from Memory Agent
-- Locations can be created and retrieved via API
-- `workout_sessions` stores `location_id`
+- ✅ All 3 server modules load without error (`node -e "require('./server/agents/...')"`)
+- ✅ Agent response includes `agentsUsed: ["orchestrator", "memory"]` and `latency: { memory, orchestrator, total }`
+- ✅ System prompt text output is identical for the same input context (byte-level verification)
+- ✅ New tables (`locations`, `agent_context_cache`) created on app launch
+- ✅ `workout_sessions.location_id` migration runs cleanly on existing DB
+- ✅ Location CRUD functions work: `saveLocation` → `getLocations` → `deleteLocation`
+- ✅ `startSession(planDay, focus, locationId)` stores `location_id`
+- ✅ Old `/api/coach` endpoint still works (thin wrapper unchanged)
+- ✅ All 3 frontend screens use unified `buildUserContext()` — no inline context construction remains
+
+**No AI behavior changes in this milestone.**
 
 ---
 

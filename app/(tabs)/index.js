@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
 import { sendCoachMessage, sendAgentMessage, submitPlanRegeneration } from '../../lib/api';
 import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData } from '../../lib/database';
+import { buildUserContext } from '../../lib/contextBuilder';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
 
 export default function ChatScreen() {
@@ -106,21 +107,12 @@ export default function ChatScreen() {
         } catch {}
       }
 
-      const userContext = {
-        goal: userProfile?.goal,
-        equipment: userProfile?.equipment,
-        currentDay: todayWorkout,
-        currentExercise: currentExName,
-        planSummary: todayWorkout?.exercises
-          ? todayWorkout.exercises.map(e => `${e.name} ${e.sets}x${e.reps} @ ${e.targetWeight}`).join(', ')
-          : null,
-        progression: progression ? {
-          suggestedWeight: progression.suggestedWeight,
-          avgRpe: progression.avgRpe,
-          isPlateaued: progression.isPlateaued,
-          pushReason: progression.pushReason,
-        } : null,
-      };
+      const userContext = buildUserContext({
+        profile: userProfile,
+        workout: todayWorkout,
+        exercise: { name: currentExName },
+        progression,
+      });
 
       let data;
       try {
