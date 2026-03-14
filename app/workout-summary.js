@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, TextInput,
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -6,6 +6,9 @@ import {
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import DraggableFlatList, { ScaleDecorator } from 'react-native-draggable-flatlist';
+import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { sendAgentMessage } from '../lib/api';
 import { getUserProfile } from '../lib/database';
@@ -72,16 +75,76 @@ export default function WorkoutSummaryScreen() {
     setAiResponse(null);
   };
 
-  const handleStart = () => {
+  const handleStartAtIndex = (idx) => {
     router.replace({
       pathname: '/workout',
       params: {
         dayJson: JSON.stringify({ ...day, exercises }),
-        startIdx: String(selectedIdx),
+        startIdx: String(idx ?? selectedIdx),
         ...(locationJson ? { locationJson } : {}),
       },
     });
   };
+
+  const handleStart = () => handleStartAtIndex(selectedIdx);
+
+  const handleDragEnd = ({ data }) => {
+    setExercises(data);
+    // Update selectedIdx to follow the previously selected exercise
+    const prevSelected = exercises[selectedIdx];
+    if (prevSelected) {
+      const newIdx = data.findIndex(e => e.name === prevSelected.name);
+      if (newIdx !== -1) setSelectedIdx(newIdx);
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const renderExercise = useCallback(({ item: exercise, getIndex, drag, isActive }) => {
+    const i = getIndex();
+    const isSelected = i === selectedIdx;
+    return (
+      <ScaleDecorator>
+        <TouchableOpacity
+          style={[styles.exerciseRow, isSelected && styles.exerciseRowSelected, isActive && styles.exerciseRowDragging]}
+          onPress={() => setSelectedIdx(i)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.exerciseThumb, isSelected && styles.exerciseThumbSelected]}>
+            <MaterialIcons
+              name="fitness-center"
+              size={24}
+              color={isSelected ? colors.bgDark : 'rgba(212,255,0,0.2)'}
+            />
+          </View>
+          <View style={styles.exerciseInfo}>
+            <Text style={[styles.exerciseName, isSelected && styles.exerciseNameSelected]}>
+              {exercise.name}
+            </Text>
+            <Text style={[styles.exerciseMeta, isSelected && styles.exerciseMetaSelected]}>
+              {exercise.sets} sets x {exercise.reps} reps
+            </Text>
+          </View>
+          {isSelected ? (
+            <TouchableOpacity
+              style={styles.playIcon}
+              onPress={() => handleStartAtIndex(i)}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialIcons name="play-arrow" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              onLongPress={drag}
+              delayLongPress={150}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <MaterialIcons name="drag-indicator" size={20} color="rgba(255,255,255,0.2)" />
+            </TouchableOpacity>
+          )}
+        </TouchableOpacity>
+      </ScaleDecorator>
+    );
+  }, [selectedIdx, exercises]);
 
   if (!day) {
     return (
@@ -92,6 +155,7 @@ export default function WorkoutSummaryScreen() {
   }
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
@@ -138,47 +202,17 @@ export default function WorkoutSummaryScreen() {
         <Text style={styles.listCount}>{exercises.length} Exercises</Text>
       </View>
 
-      <ScrollView
+      <DraggableFlatList
+        data={exercises}
+        keyExtractor={(item, index) => `${item.name}-${index}`}
+        renderItem={renderExercise}
+        onDragBegin={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+        onDragEnd={handleDragEnd}
         style={styles.listArea}
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-      >
-        {exercises.map((exercise, i) => {
-          const isSelected = i === selectedIdx;
-          return (
-            <TouchableOpacity
-              key={i}
-              style={[styles.exerciseRow, isSelected && styles.exerciseRowSelected]}
-              onPress={() => setSelectedIdx(i)}
-              activeOpacity={0.7}
-            >
-              <View style={[styles.exerciseThumb, isSelected && styles.exerciseThumbSelected]}>
-                <MaterialIcons
-                  name="fitness-center"
-                  size={24}
-                  color={isSelected ? colors.bgDark : 'rgba(212,255,0,0.2)'}
-                />
-              </View>
-              <View style={styles.exerciseInfo}>
-                <Text style={[styles.exerciseName, isSelected && styles.exerciseNameSelected]}>
-                  {exercise.name}
-                </Text>
-                <Text style={[styles.exerciseMeta, isSelected && styles.exerciseMetaSelected]}>
-                  {exercise.sets} sets x {exercise.reps} reps
-                </Text>
-              </View>
-              {isSelected ? (
-                <View style={styles.playIcon}>
-                  <MaterialIcons name="play-arrow" size={20} color={colors.primary} />
-                </View>
-              ) : (
-                <MaterialIcons name="drag-indicator" size={20} color="rgba(255,255,255,0.2)" />
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      />
 
       {/* Bottom Section */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -208,7 +242,12 @@ export default function WorkoutSummaryScreen() {
 
           {/* AI Response Area */}
           {(isLoading || aiResponse) && (
-            <View style={styles.aiResponseContainer}>
+            <ScrollView
+              style={styles.aiResponseScroll}
+              contentContainerStyle={styles.aiResponseContainer}
+              showsVerticalScrollIndicator={true}
+              nestedScrollEnabled={true}
+            >
               {isLoading && (
                 <View style={styles.loadingRow}>
                   <ActivityIndicator size="small" color={colors.primary} />
@@ -224,7 +263,7 @@ export default function WorkoutSummaryScreen() {
                   onSwap={(newName) => handleSwapExercise(aiResponse.swapSuggestion.original_exercise, newName)}
                 />
               )}
-            </View>
+            </ScrollView>
           )}
 
           {/* Start CTA */}
@@ -237,6 +276,7 @@ export default function WorkoutSummaryScreen() {
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 
@@ -288,6 +328,10 @@ const styles = StyleSheet.create({
   exerciseRowSelected: {
     backgroundColor: colors.primary, borderColor: 'rgba(212,255,0,0.2)',
   },
+  exerciseRowDragging: {
+    opacity: 0.9, shadowColor: '#000', shadowOpacity: 0.3,
+    shadowOffset: { width: 0, height: 4 }, shadowRadius: 8, elevation: 8,
+  },
   exerciseThumb: {
     width: 56, height: 56, borderRadius: radius.md,
     backgroundColor: 'rgba(212,255,0,0.05)', justifyContent: 'center', alignItems: 'center',
@@ -322,12 +366,15 @@ const styles = StyleSheet.create({
   },
 
   // AI Response
-  aiResponseContainer: {
+  aiResponseScroll: {
+    maxHeight: 280,
     backgroundColor: 'rgba(45,49,21,0.5)',
     borderRadius: radius.md,
-    padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.borderSubtle,
+  },
+  aiResponseContainer: {
+    padding: spacing.md,
   },
   aiResponseText: {
     fontSize: 14,
