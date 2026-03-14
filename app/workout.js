@@ -11,7 +11,7 @@ import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
-import { sendCoachMessage, sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
+import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
@@ -282,16 +282,10 @@ export default function WorkoutScreen() {
         location,
         motivation: { exerciseMaxWeight, streakData, completedSessions },
       });
-      let data;
-      try {
-        data = await sendAgentMessage(text, [], userContext);
-      } catch (agentErr) {
-        console.warn('Agent endpoint failed, falling back to coach:', agentErr.message);
-        data = await sendCoachMessage(text, [], userContext);
-      }
+      const data = await sendAgentMessage(text, [], userContext);
       setAiResponse({ text: data.text });
     } catch {
-      setAiResponse({ text: 'Connection error — keep pushing!' });
+      setAiResponse({ text: "Couldn't reach Aura right now. Keep pushing!" });
     } finally {
       setIsAiLoading(false);
     }
@@ -368,7 +362,6 @@ export default function WorkoutScreen() {
             motivation: { exerciseMaxWeight, streakData, completedSessions },
           });
           sendAgentMessage('__workout_complete__', [], completeCtx)
-            .catch(() => sendCoachMessage('__workout_complete__', [], completeCtx))
             .then(data => setCompleteMessage(data.text))
             .catch(() => setCompleteMessage('Great work today — you crushed it!'));
         };

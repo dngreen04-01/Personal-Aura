@@ -201,4 +201,70 @@ You MUST respond with valid JSON matching this exact schema:
   return JSON.parse(response.text);
 }
 
-module.exports = { handleSwapRequest, handlePlanModification, handleProgressiveOverload };
+/**
+ * Handle full plan regeneration (called by programmer route).
+ * Analyzes workout history and generates an updated plan with progressive overload.
+ */
+async function handlePlanRegeneration({ userProfile, currentPlan, workoutHistory, schedule }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY missing');
+
+  const systemPrompt = `${BASE_IDENTITY}
+
+Your task: Analyze the user's workout history (up to 30 days) and current plan, then generate an updated plan that applies progressive overload and addresses plateaus.
+
+Analysis Framework:
+${PROGRESSIVE_OVERLOAD_RULES}
+- Volume Adjustment: If user consistently completes all sets with low RPE, consider adding a set. If failing sets, reduce.
+- Schedule Respect: Keep the same number of training days and time constraints.
+- Weight Specificity: Every exercise in the updated plan MUST have a specific numeric targetWeight. Use the workout history to calculate appropriate weights — never leave weights vague.
+
+You MUST respond with valid JSON matching this exact schema:
+{
+  "plan": [
+    {
+      "day": "Monday",
+      "focus": "Push (Chest, Shoulders, Triceps)",
+      "exercises": [
+        { "name": "Bench Press", "sets": 3, "reps": "8-10", "targetWeight": "82.5kg", "restSeconds": 90 }
+      ]
+    }
+  ],
+  "changes": [
+    "Bench Press: Weight increased from 80kg to 82.5kg (avg RPE 6.5, consistently hitting 10 reps)"
+  ]
+}`;
+
+  const prompt = `User Profile:
+- Goal: ${userProfile?.goal || 'Unknown'}
+- Equipment: ${userProfile?.equipment || 'Unknown'}
+- Age: ${userProfile?.age || 'Unknown'}
+- Weight: ${userProfile?.weight_kg ? userProfile.weight_kg + 'kg' : 'Unknown'}
+- Gender: ${userProfile?.gender || 'Unknown'}
+
+Schedule:
+- Days Per Week: ${schedule?.daysPerWeek || currentPlan?.length || 7}
+- Minutes Per Session: ${schedule?.minutesPerSession || 60}
+
+Current Plan:
+${JSON.stringify(currentPlan, null, 2)}
+
+Workout History (Last 30 Days):
+${JSON.stringify(workoutHistory, null, 2)}
+
+Analyze the workout history, detect plateaus, apply progressive overload based on RPE data, and generate an updated plan.`;
+
+  const ai = new GoogleGenAI({ apiKey });
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    contents: prompt,
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json',
+    },
+  });
+
+  return JSON.parse(response.text);
+}
+
+module.exports = { handleSwapRequest, handlePlanModification, handleProgressiveOverload, handlePlanRegeneration };

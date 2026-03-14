@@ -7,7 +7,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
-import { sendCoachMessage, sendAgentMessage, submitPlanRegeneration } from '../../lib/api';
+import { sendAgentMessage, submitPlanRegeneration } from '../../lib/api';
 import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
@@ -122,13 +122,7 @@ export default function ChatScreen() {
         location: selectedLocation,
       });
 
-      let data;
-      try {
-        data = await sendAgentMessage(text, history, userContext);
-      } catch (agentErr) {
-        console.warn('Agent endpoint failed, falling back to coach:', agentErr.message);
-        data = await sendCoachMessage(text, history, userContext);
-      }
+      const data = await sendAgentMessage(text, history, userContext);
 
       setMessages(prev => [
         ...prev,
@@ -143,7 +137,7 @@ export default function ChatScreen() {
       ]);
     } catch (err) {
       console.error(err);
-      setMessages(prev => [...prev, { role: 'model', text: 'Connection error. Keep pushing!' }]);
+      setMessages(prev => [...prev, { role: 'model', text: "Couldn't reach Aura right now. Try again in a moment." }]);
     } finally {
       setIsLoading(false);
     }

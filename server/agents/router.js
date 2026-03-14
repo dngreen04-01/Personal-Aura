@@ -6,6 +6,27 @@ const { AGENTS, buildAgentResponse, logInteraction } = require('./types');
 const { evaluateSet, checkMilestone, buildMotivationDirective } = require('./motivation');
 
 /**
+ * Race a promise against a timeout. Rejects with a descriptive error on timeout.
+ */
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
+// Per-agent timeout budgets (ms)
+const TIMEOUTS = {
+  memory: 2000,
+  orchestrator: 15000,  // generous for function-calling round-trips
+  planning: 15000,
+  visual: 30000,
+  motivation: 500,
+};
+
+/**
  * Classify user intent via keyword matching (<1ms).
  * Returns: 'swap' | 'plan_modify' | 'overload' | 'chat'
  */
@@ -60,7 +81,11 @@ async function routeRequest({ message, history, userContext }) {
     const planningStart = Date.now();
 
     try {
-      const result = await planningHandler(message, agentContext);
+      const result = await withTimeout(
+        planningHandler(message, agentContext),
+        TIMEOUTS.planning,
+        'Planning Agent'
+      );
       const planningLatency = Date.now() - planningStart;
       const totalLatency = Date.now() - startTime;
 
@@ -109,7 +134,11 @@ async function routeRequest({ message, history, userContext }) {
       }
 
       const equipment = agentContext.user?.equipment || null;
-      const result = await generateExerciseDemo(exerciseName, equipment);
+      const result = await withTimeout(
+        generateExerciseDemo(exerciseName, equipment),
+        TIMEOUTS.visual,
+        'Visual Agent'
+      );
       const visualLatency = Date.now() - visualStart;
       const totalLatency = Date.now() - startTime;
 
@@ -141,7 +170,11 @@ async function routeRequest({ message, history, userContext }) {
   const memoryLatency = Date.now() - memoryStart;
 
   const orchestratorStart = Date.now();
-  const result = await handleMessage({ message, history, userContext });
+  const result = await withTimeout(
+    handleMessage({ message, history, userContext }),
+    TIMEOUTS.orchestrator,
+    'Orchestrator'
+  );
   const orchestratorLatency = Date.now() - orchestratorStart;
 
   // --- Motivation Engine: evaluate after log_set function calls ---

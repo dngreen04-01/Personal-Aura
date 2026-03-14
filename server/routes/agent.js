@@ -1,7 +1,24 @@
 const express = require('express');
 const { routeRequest } = require('../agents/router');
 const { generateExerciseDemo, generateFormCheck, generateWorkoutCard } = require('../agents/visual');
+const { AGENTS } = require('../agents/types');
 const router = express.Router();
+
+// Health check for all agents
+router.get('/health', (req, res) => {
+  const hasApiKey = !!process.env.GEMINI_API_KEY;
+  res.json({
+    status: hasApiKey ? 'ok' : 'degraded',
+    agents: {
+      [AGENTS.orchestrator]: hasApiKey ? 'ok' : 'no_api_key',
+      [AGENTS.planning]: hasApiKey ? 'ok' : 'no_api_key',
+      [AGENTS.memory]: 'ok',  // deterministic, no external deps
+      [AGENTS.visual]: hasApiKey ? 'ok' : 'no_api_key',
+      [AGENTS.motivation]: 'ok',  // deterministic, no external deps
+    },
+    timestamp: new Date().toISOString(),
+  });
+});
 
 router.post('/', async (req, res) => {
   try {
@@ -15,7 +32,11 @@ router.post('/', async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Agent API Error:', error);
-    res.status(500).json({ error: error.message });
+    const isTimeout = error.message?.includes('timed out');
+    res.status(isTimeout ? 504 : 500).json({
+      error: isTimeout ? 'Request timed out. Please try again.' : error.message,
+      retryable: isTimeout,
+    });
   }
 });
 

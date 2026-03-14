@@ -2,7 +2,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const coachRouter = require('./routes/coach');
 const agentRouter = require('./routes/agent');
 const onboardingRouter = require('./routes/onboarding');
 const progressRouter = require('./routes/progress');
@@ -18,7 +17,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.use('/api/coach', coachRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api/onboarding', onboardingRouter);
 app.use('/api/progress', progressRouter);
