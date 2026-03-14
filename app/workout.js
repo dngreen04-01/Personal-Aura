@@ -9,10 +9,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
 import { sendCoachMessage, sendAgentMessage } from '../lib/api';
 import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
+import { evaluateSet, checkMilestone } from '../lib/motivation';
 
 // Lazy-load expo-notifications (not available in Expo Go SDK 53+)
 let Notifications = null;
@@ -67,6 +68,10 @@ export default function WorkoutScreen() {
   const [showComplete, setShowComplete] = useState(false);
   const [completeStats, setCompleteStats] = useState(null);
   const [completeMessage, setCompleteMessage] = useState(null);
+  const [celebration, setCelebration] = useState(null);
+  const [exerciseMaxWeight, setExerciseMaxWeight] = useState(null);
+  const [streakData, setStreakData] = useState(null);
+  const [completedSessions, setCompletedSessions] = useState(null);
   const inputRef = useRef(null);
   const weightInputRef = useRef(null);
 
@@ -87,6 +92,16 @@ export default function WorkoutScreen() {
           const unit = await getExerciseUnitPreference(currentExercise.name);
           setWeightUnit(unit);
           setWeightIncrement(getDefaultIncrement(unit));
+
+          // Load milestone data for motivation engine
+          const [maxW, streak, sessions] = await Promise.all([
+            getExerciseMaxWeight(currentExercise.name),
+            getWorkoutStreak(),
+            getCompletedSessionCount(),
+          ]);
+          setExerciseMaxWeight(maxW);
+          setStreakData(streak);
+          setCompletedSessions(sessions);
 
           const progression = await getExerciseProgressionData(currentExercise.name, 4, unit);
           // Plan target is always in kg — convert to display unit
@@ -226,6 +241,7 @@ export default function WorkoutScreen() {
           isResting,
         },
         location,
+        motivation: { exerciseMaxWeight, streakData, completedSessions },
       });
       let data;
       try {
@@ -249,29 +265,39 @@ export default function WorkoutScreen() {
     }
     setLastLoggedWeight(weight);
 
-    // Proactive coach suggestion when RPE is low — suggest pushing weight up
-    if (rpe !== null && currentSet < totalSets) {
-      const goal = (userProfile?.goal || '').toLowerCase();
-      let pushThreshold;
-      if (goal.includes('strength')) {
-        pushThreshold = 8;
-      } else if (goal.includes('fat') || goal.includes('lose')) {
-        pushThreshold = 6;
-      } else {
-        pushThreshold = 7;
+    // Motivation Engine: evaluate set and provide structured coaching feedback
+    if (rpe !== null) {
+      const evaluation = evaluateSet({
+        rpe,
+        goal: userProfile?.goal,
+        currentWeight: weight,
+        weightUnit,
+        exerciseName: currentExercise.name,
+      });
+
+      // Check for milestones
+      const milestone = checkMilestone({
+        currentWeight: weight,
+        exerciseMaxWeight,
+        streakData,
+        completedSessions,
+      });
+
+      // Show coaching message
+      setAiResponse({ text: evaluation.messageHint });
+
+      // Show celebration banner on milestone
+      if (milestone) {
+        setCelebration(milestone);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setTimeout(() => setCelebration(null), 3000);
       }
 
-      if (rpe < pushThreshold) {
-        const lowerKeywords = ['squat', 'deadlift', 'rdl', 'lunge', 'leg press', 'leg curl',
-          'leg extension', 'hip thrust', 'calf', 'glute', 'hamstring', 'step up', 'step-up',
-          'goblet', 'hack squat', 'bulgarian'];
-        const isLower = lowerKeywords.some(kw => (currentExercise.name || '').toLowerCase().includes(kw));
-        const incrementKg = isLower ? 5 : 2.5;
-        const increment = weightUnit === 'lbs' ? Math.round(incrementKg * 2.20462) : incrementKg;
-        const suggestedWeight = weight + increment;
-        setAiResponse({
-          text: `RPE ${rpe} — you've got more in the tank! Try ${suggestedWeight}${weightUnit} next set.`,
-        });
+      // Auto-bump weight for next set if push tone with weight adjustment
+      if (evaluation.tone === 'push' && evaluation.weightAdjustment && currentSet < totalSets) {
+        const adjKg = evaluation.weightAdjustment.value;
+        const increment = weightUnit === 'lbs' ? Math.round(adjKg * 2.20462) : adjKg;
+        setWeight(w => w + increment);
       }
     }
 
@@ -300,6 +326,7 @@ export default function WorkoutScreen() {
             profile: userProfile,
             completion: stats,
             location,
+            motivation: { exerciseMaxWeight, streakData, completedSessions },
           });
           sendAgentMessage('__workout_complete__', [], completeCtx)
             .catch(() => sendCoachMessage('__workout_complete__', [], completeCtx))
@@ -358,6 +385,14 @@ export default function WorkoutScreen() {
           </View>
         </TouchableOpacity>
       </View>
+
+      {/* Celebration Banner */}
+      {celebration && (
+        <View style={styles.celebrationBanner}>
+          <MaterialIcons name="emoji-events" size={20} color={colors.bgDark} />
+          <Text style={styles.celebrationText}>{celebration.message}</Text>
+        </View>
+      )}
 
       {/* Progress Bar */}
       <View style={styles.progressSection}>
@@ -758,6 +793,17 @@ const styles = StyleSheet.create({
   settingsButton: {
     width: 40, height: 40, borderRadius: radius.sm,
     backgroundColor: 'rgba(212,255,0,0.1)', justifyContent: 'center', alignItems: 'center',
+  },
+
+  // Celebration banner
+  celebrationBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    marginHorizontal: spacing.md, marginTop: spacing.xs,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: radius.lg, backgroundColor: colors.primary,
+  },
+  celebrationText: {
+    flex: 1, fontSize: 13, fontFamily: 'Inter_700Bold', color: colors.bgDark,
   },
 
   // Progress

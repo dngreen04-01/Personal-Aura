@@ -53,6 +53,11 @@ function buildAgentContext(userContext) {
       totalVolume: ctx.workoutComplete.total_volume || 0,
       durationSeconds: ctx.workoutComplete.duration_seconds || 0,
     } : null,
+    motivation: {
+      exerciseMaxWeight: ctx.exerciseMaxWeight || null,
+      streakData: ctx.streakData || null,
+      completedSessions: ctx.completedSessions || null,
+    },
   };
 }
 

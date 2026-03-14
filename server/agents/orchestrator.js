@@ -1,5 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const { buildAgentContext, formatContextBlock, formatCompletionDirective } = require('./memory');
+const { evaluateSet } = require('./motivation');
 
 const MODEL_NAME = 'gemini-3.1-flash-lite-preview';
 
@@ -15,7 +16,7 @@ Your Core Directives:
 3. Data Parsing: When the user logs a set, you MUST trigger the log_set function.
 4. Rest Timers: After every logged set, automatically determine the optimal rest time and trigger the log_set function with recommended_rest_seconds. Use these guidelines: 60-90s for hypertrophy, 120-180s for strength, 30-60s for endurance.
 5. Exercise Swaps: When a user asks to swap, replace, or find an alternative for an exercise (due to equipment unavailability, injury, preference, etc.), you MUST call the suggest_swap function. Provide 3 alternatives that target the same muscle groups. Mark the best overall alternative as recommended. Include a brief reason for each suggestion (e.g. "Better stabilization required", "Maximum isolation", "High tricep activation").
-6. Weight Progression: If the Progression Status indicates a push recommendation, briefly encourage the user to try the suggested weight. Be confident but not pushy — frame it as earned progress. If RPE data shows they're ready, mention it naturally (e.g., "Your last few sets looked smooth — let's try 82.5kg today").
+6. Weight Progression: After a set is logged, the Motivation Engine provides coaching tone and weight suggestions. Follow its directive for encouragement and weight adjustments. If no directive is present, acknowledge the set briefly.
 
 Tone: Professional, energetic, and concise.`;
 }
@@ -109,11 +110,29 @@ async function handleMessage({ message, history, userContext }) {
     if (call.name === 'log_set') {
       functionCallData = call.args;
 
+      // Evaluate set through Motivation Engine to shape LLM response tone
+      let motivationHint = null;
+      try {
+        const evaluation = evaluateSet({
+          rpe: call.args.rpe,
+          goal: agentContext.user.goal,
+          currentWeight: call.args.weight,
+          weightUnit: call.args.weight_unit,
+          exerciseName: call.args.exercise_id,
+        });
+        motivationHint = evaluation.messageHint;
+      } catch {}
+
+      const functionResponseData = { status: 'success', set_logged: call.args };
+      if (motivationHint) {
+        functionResponseData.coaching_hint = motivationHint;
+      }
+
       const toolResult = await chat.sendMessage({
         message: [{
           functionResponse: {
             name: 'log_set',
-            response: { status: 'success', set_logged: call.args },
+            response: functionResponseData,
           },
         }],
       });
