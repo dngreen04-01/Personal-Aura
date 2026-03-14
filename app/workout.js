@@ -430,7 +430,15 @@ export default function WorkoutScreen() {
       <View style={styles.progressSection}>
         <View style={styles.progressLabels}>
           <Text style={styles.progressLabel}>PROGRESS</Text>
-          <Text style={styles.progressPercent}>{progressPercent}%</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+            {!isResting && (
+              <View style={styles.restPreviewInline}>
+                <MaterialIcons name="timer" size={14} color={colors.textSecondary} />
+                <Text style={styles.restPreviewInlineText}>{formatTime(restDuration)}</Text>
+              </View>
+            )}
+            <Text style={styles.progressPercent}>{progressPercent}%</Text>
+          </View>
         </View>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${progressPercent}%` }]} />
@@ -506,19 +514,6 @@ export default function WorkoutScreen() {
               <View style={styles.adjusterRow}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, flexShrink: 1 }}>
                   <Text style={styles.adjusterLabel} numberOfLines={1}>Weight</Text>
-                  <TouchableOpacity
-                    style={styles.unitToggle}
-                    onPress={() => {
-                      const newUnit = weightUnit === 'kg' ? 'lbs' : 'kg';
-                      const converted = snapToIncrement(convertWeight(weight, weightUnit, newUnit), newUnit);
-                      setWeight(converted);
-                      setWeightUnit(newUnit);
-                      setWeightIncrement(getDefaultIncrement(newUnit));
-                      setExerciseUnitPreference(currentExercise.name, newUnit);
-                    }}
-                  >
-                    <Text style={styles.unitToggleText}>{weightUnit.toUpperCase()}</Text>
-                  </TouchableOpacity>
                   {weightBadge && (
                     <View style={[styles.weightBadge, { backgroundColor: weightBadge.startsWith('+') ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)' }]}>
                       <Text style={[styles.weightBadgeText, { color: weightBadge.startsWith('+') ? 'rgb(34,197,94)' : 'rgb(239,68,68)' }]}>{weightBadge}</Text>
@@ -567,15 +562,30 @@ export default function WorkoutScreen() {
                         <Text style={styles.adjusterValue} numberOfLines={1}>{formatWeight(weight, weightUnit)}</Text>
                       </TouchableOpacity>
                     )}
-                    <TouchableOpacity
-                      onPress={() => {
-                        const increments = getIncrements(weightUnit);
-                        const idx = increments.indexOf(weightIncrement);
-                        setWeightIncrement(increments[(idx + 1) % increments.length]);
-                      }}
-                    >
-                      <Text style={styles.incrementLabel}>±{weightIncrement}</Text>
-                    </TouchableOpacity>
+                    <View style={styles.unitIncrementRow}>
+                      <TouchableOpacity
+                        style={styles.unitToggle}
+                        onPress={() => {
+                          const newUnit = weightUnit === 'kg' ? 'lbs' : 'kg';
+                          const converted = snapToIncrement(convertWeight(weight, weightUnit, newUnit), newUnit);
+                          setWeight(converted);
+                          setWeightUnit(newUnit);
+                          setWeightIncrement(getDefaultIncrement(newUnit));
+                          setExerciseUnitPreference(currentExercise.name, newUnit);
+                        }}
+                      >
+                        <Text style={styles.unitToggleText}>{weightUnit.toUpperCase()}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => {
+                          const increments = getIncrements(weightUnit);
+                          const idx = increments.indexOf(weightIncrement);
+                          setWeightIncrement(increments[(idx + 1) % increments.length]);
+                        }}
+                      >
+                        <Text style={styles.incrementLabel}>±{weightIncrement}</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                   <TouchableOpacity
                     style={styles.adjusterButton}
@@ -691,15 +701,6 @@ export default function WorkoutScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Rest timer preview (top right, when not resting) */}
-      {!isResting && (
-        <View style={styles.restPreview}>
-          <View style={styles.restPreviewCircle}>
-            <Text style={styles.restPreviewTime}>{formatTime(restDuration)}</Text>
-          </View>
-          <Text style={styles.restPreviewLabel}>NEXT: REST</Text>
-        </View>
-      )}
 
       {/* Workout Complete Overlay */}
       <Modal visible={showComplete} animationType="fade" transparent>
@@ -943,10 +944,14 @@ const styles = StyleSheet.create({
   },
   unitToggle: {
     backgroundColor: 'rgba(212,255,0,0.15)', borderRadius: radius.sm,
-    paddingHorizontal: 8, paddingVertical: 3,
+    paddingHorizontal: 10, paddingVertical: 4,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.25)',
   },
-  unitToggleText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.primary },
-  incrementLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary, marginTop: 2 },
+  unitToggleText: { fontSize: 12, fontFamily: 'Inter_700Bold', color: colors.primary },
+  unitIncrementRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2,
+  },
+  incrementLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
   divider: { height: 1, backgroundColor: 'rgba(212,255,0,0.1)' },
 
   // Done button
@@ -1008,18 +1013,16 @@ const styles = StyleSheet.create({
     fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic',
   },
 
-  // Rest preview (top right ghost)
-  restPreview: {
-    position: 'absolute', top: 110, right: spacing.md,
-    alignItems: 'center', gap: 4, opacity: 0.35,
+  // Rest preview (inline in progress bar)
+  restPreviewInline: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(212,255,0,0.08)', borderRadius: radius.sm,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.1)',
   },
-  restPreviewCircle: {
-    width: 56, height: 56, borderRadius: 28,
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center', alignItems: 'center',
+  restPreviewInlineText: {
+    fontSize: 11, fontFamily: 'Inter_600SemiBold', color: colors.textSecondary,
   },
-  restPreviewTime: { fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
-  restPreviewLabel: { fontSize: 7, fontFamily: 'Inter_700Bold', color: colors.textSecondary, letterSpacing: 1 },
 
   // Push suggestion banner
   pushBanner: {
