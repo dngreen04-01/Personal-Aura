@@ -11,7 +11,7 @@ const AGENTS = {
 /**
  * Build a standardized agent response (superset of coach response shape).
  */
-function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, planModification = null, overloadSuggestion = null, motivationDirective = null, agentsUsed = [], latency = {} }) {
+function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, planModification = null, overloadSuggestion = null, motivationDirective = null, image = null, imageCaption = null, agentsUsed = [], latency = {} }) {
   return {
     text,
     functionCall,
@@ -19,6 +19,8 @@ function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, 
     planModification,
     overloadSuggestion,
     motivationDirective,
+    image,
+    imageCaption,
     agentsUsed,
     latency,
   };
@@ -28,7 +30,7 @@ function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, 
  * Log agent interaction as structured JSON (non-blocking).
  * In Cloud Run, structured JSON logs are automatically parsed.
  */
-function logInteraction({ userMessage, agentsInvoked, orchestratorLatencyMs, planningLatencyMs, motivationLatencyMs, totalLatencyMs }) {
+function logInteraction({ userMessage, agentsInvoked, orchestratorLatencyMs, planningLatencyMs, motivationLatencyMs, visualLatencyMs, totalLatencyMs }) {
   const entry = {
     type: 'agent-interaction',
     timestamp: new Date().toISOString(),
@@ -37,6 +39,7 @@ function logInteraction({ userMessage, agentsInvoked, orchestratorLatencyMs, pla
     orchestratorLatencyMs,
     planningLatencyMs: planningLatencyMs || null,
     motivationLatencyMs: motivationLatencyMs || null,
+    visualLatencyMs: visualLatencyMs || null,
     totalLatencyMs,
   };
   // Non-blocking log

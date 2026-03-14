@@ -1,5 +1,6 @@
 const { handleMessage } = require('./orchestrator');
 const { handleSwapRequest, handlePlanModification, handleProgressiveOverload } = require('./planning');
+const { generateExerciseDemo } = require('./visual');
 const { buildAgentContext } = require('./memory');
 const { AGENTS, buildAgentResponse, logInteraction } = require('./types');
 const { evaluateSet, checkMilestone, buildMotivationDirective } = require('./motivation');
@@ -26,6 +27,11 @@ function classifyIntent(message) {
   const overloadKw = ['go heavier', 'increase weight', 'add weight', 'weight progression',
     'ready for more', 'should i increase'];
   if (overloadKw.some(k => lower.includes(k))) return 'overload';
+
+  // Visual: exercise demo / form check requests
+  const visualKw = ['show me', 'what does', 'look like', 'demonstrate', 'form check',
+    'how to do', 'proper form', 'exercise demo', 'show form'];
+  if (visualKw.some(k => lower.includes(k))) return 'visual';
 
   return 'chat';
 }
@@ -79,6 +85,53 @@ async function routeRequest({ message, history, userContext }) {
     } catch (err) {
       // Fallback: let orchestrator handle it via function calling
       console.error(`Planning agent failed (intent: ${intent}), falling back to orchestrator:`, err.message);
+    }
+  }
+
+  // --- Visual Agent path ---
+  if (intent === 'visual') {
+    const agentContext = buildAgentContext(userContext);
+    const visualStart = Date.now();
+
+    try {
+      // Extract exercise name: strip visual keywords, fall back to current exercise
+      const visualStrip = ['show me', 'what does', 'look like', 'demonstrate', 'form check',
+        'how to do', 'proper form', 'exercise demo', 'show form', 'how do i do', 'how do you do'];
+      let exerciseName = (message || '').toLowerCase();
+      for (const kw of visualStrip) {
+        exerciseName = exerciseName.replace(kw, '');
+      }
+      exerciseName = exerciseName.replace(/[?!.,]/g, '').trim();
+
+      // Fall back to current exercise from context
+      if (!exerciseName || exerciseName.length < 2) {
+        exerciseName = agentContext.workout?.currentExercise || 'exercise';
+      }
+
+      const equipment = agentContext.user?.equipment || null;
+      const result = await generateExerciseDemo(exerciseName, equipment);
+      const visualLatency = Date.now() - visualStart;
+      const totalLatency = Date.now() - startTime;
+
+      logInteraction({
+        userMessage: message,
+        agentsInvoked: [AGENTS.orchestrator, AGENTS.memory, AGENTS.visual],
+        visualLatencyMs: visualLatency,
+        totalLatencyMs: totalLatency,
+      });
+
+      return buildAgentResponse({
+        text: result.caption,
+        image: result.image,
+        imageCaption: result.caption,
+        agentsUsed: [AGENTS.orchestrator, AGENTS.memory, AGENTS.visual],
+        latency: {
+          visual: visualLatency,
+          total: totalLatency,
+        },
+      });
+    } catch (err) {
+      console.error('Visual agent failed, falling back to orchestrator:', err.message);
     }
   }
 

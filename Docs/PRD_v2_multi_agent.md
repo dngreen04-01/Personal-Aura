@@ -614,35 +614,85 @@ Each milestone is scoped to be completable in a single coding session (2-4 hours
 
 ---
 
-### Milestone 6: Visual Generation Agent
+### Milestone 6: Visual Generation Agent ✅ COMPLETE (2026-03-14)
 
 **Goal:** Add image generation capabilities for exercise demonstrations and form checks.
 
+**Status:** Implemented and verified. Visual Agent created with 3 image generation functions, `POST /api/agent/image` endpoint added, visual intent classification added to router, "Show Me" button wired in workout screen, shareable workout card added to completion modal. All 6 server agent modules load cleanly. 9/9 intent classification tests pass. `expo export --platform ios` compiles without errors.
+
+**Architectural decision:** Visual intent classification lives in the **router** (same pattern as planning intent from Milestone 4), not the orchestrator. The router calls `classifyIntent()` (<1ms keyword matching) — visual intents go directly to the Visual Agent, bypassing the orchestrator entirely. If the Visual Agent fails, the router falls through to the orchestrator for a text-only response. The `POST /api/agent/image` endpoint exists as a **separate direct endpoint** for the "Show Me" button and "Share Workout" card, which bypass the chat/router flow entirely (no message needed, just exercise name or session stats).
+
 **Backend tasks:**
-1. Create `server/agents/visual.js`:
-   - `generateExerciseDemo(exercise, equipment, modification)` — Generate exercise demonstration image
-   - `generateFormCheck(exercise, userDescription)` — Generate form correction visual
-   - `generateWorkoutCard(sessionStats)` — Generate shareable summary card
-   - Uses Gemini 3.1 Flash Image model
-   - Returns base64 image + caption
-2. Create `POST /api/agent/image` endpoint in `server/routes/agent.js`
-3. Update `server/agents/orchestrator.js`:
-   - If user asks "show me how to do X" or "what does X look like" → route to Visual Agent
-   - Include image in response payload
-4. Add image caching layer (cache generated images by exercise+equipment key to avoid redundant generation)
+1. ✅ Created `server/agents/visual.js` — 3 exported functions, all using `gemini-2.0-flash-exp` with `responseModalities: ['TEXT', 'IMAGE']`:
+   - `generateExerciseDemo(exercise, equipment, modification)` — Generates instructional fitness illustration with muscle group labels, movement arrows, starting/ending positions. System prompt enforces fitness-only content.
+   - `generateFormCheck(exercise, userDescription)` — Generates side-by-side correct vs incorrect form comparison with X/checkmark markers.
+   - `generateWorkoutCard(sessionStats)` — Generates dark-themed shareable summary card with Aura branding, stats layout, Instagram-story aspect ratio.
+   - Response parsing extracts `inlineData` (base64 image) and `text` (caption) from Gemini multimodal response parts.
+   - In-memory LRU cache: `Map` keyed by `${exercise}|${equipment}|${modification}`, max 100 entries, oldest-first eviction. Cloud Run instances are ephemeral so in-memory is appropriate.
+2. ✅ Created `POST /api/agent/image` endpoint in `server/routes/agent.js`:
+   - Accepts `{ type, exercise, equipment, modification, userDescription, sessionStats }`
+   - Routes to `generateExerciseDemo`, `generateFormCheck`, or `generateWorkoutCard` based on `type` field
+   - 30s server-side timeout (returns 504 if exceeded)
+   - Returns `{ image, caption }` or `{ error }` with 500
+3. ✅ Updated `server/agents/router.js` — Visual intent classification and routing (NOT orchestrator — same pattern as planning):
+   - Added `'visual'` return value to `classifyIntent()` with keywords: 'show me', 'what does', 'look like', 'demonstrate', 'form check', 'how to do', 'proper form', 'exercise demo', 'show form'
+   - Visual routing block between planning path and orchestrator path: extracts exercise name by stripping visual keywords from message, falls back to `agentContext.workout.currentExercise`, calls `generateExerciseDemo()`, returns `buildAgentResponse()` with `image`, `imageCaption`, `agentsUsed: ['orchestrator', 'memory', 'visual']`
+   - Try/catch with fallback to orchestrator (same pattern as planning agent fallback)
+4. ✅ In-memory cache in `visual.js` (see #1) — keyed by `exercise|equipment|modification`, max 100 entries
+5. ✅ Updated `server/index.js` — JSON body limit increased from default to `5mb` for base64 image payloads (~300-500KB per 512x512 PNG)
+6. ✅ Updated `server/agents/types.js`:
+   - Added `image` (default `null`) and `imageCaption` (default `null`) to `buildAgentResponse()` return object
+   - Added `visualLatencyMs` (optional) to `logInteraction()` entry
 
 **Frontend tasks:**
-5. Add `generateExerciseImage()` to `lib/api.js`
-6. Create `ImageMessage` component for rendering generated images in chat
-7. Update chat screen to display images inline when response includes `image` field
-8. Add "Show me" quick action button on exercise header in workout screen
-9. Add shareable workout summary card generation on workout completion
+7. ✅ Added `generateExerciseImage(exercise, equipment, modification)` and `generateWorkoutCard(sessionStats)` to `lib/api.js` — both POST to `/api/agent/image` with 30s AbortController timeout (following `generatePlan` pattern)
+8. ✅ Created `components/ImageMessage.js` — Chat image widget following `SwapExerciseWidget.js` pattern:
+   - Container: `bgCard` bg, `borderSubtle` border, `radius.md` rounding
+   - Header bar: image icon + "Exercise Demo" label with primary accent
+   - Image: RN `<Image source={{ uri }}/>` with `resizeMode="contain"`, 280px height
+   - Caption: Below image, `fontSize: 13`, `Inter_400Regular`, `textSecondary`
+9. ✅ Updated `app/(tabs)/index.js` — Render images in chat:
+   - Imported `ImageMessage` component
+   - Added `image` and `imageCaption` to message state in `handleSend` response handling
+   - Added conditional render after `swapSuggestion` block: `{msg.image && <ImageMessage ... />}`
+10. ✅ Updated `app/workout.js` — "Show Me" button + image display:
+    - Added `Image` and `Share` to react-native imports
+    - Added `generateExerciseImage` and `generateWorkoutCard` to api imports
+    - Added state: `exerciseImage`, `isImageLoading`, `shareImage`, `isShareLoading`
+    - Rewired `formGuideButton` (was non-functional) as "Show Me" toggle: if image exists, clears it; otherwise calls `generateExerciseImage(currentExercise.name, equipment)` with loading state
+    - Button icon changes between `visibility`/`visibility-off` based on image state; shows `ActivityIndicator` while loading
+    - Exercise demo image displays below target section in a styled container matching app theme
+    - `exerciseImage` cleared on exercise change in existing `useEffect`
+11. ✅ Updated `app/workout.js` — Shareable workout card in completion modal:
+    - "Share Workout" button added before FINISH button in completion modal
+    - Calls `generateWorkoutCard(completeStats)` API on press
+    - Displays generated card image in modal with `resizeMode="contain"`
+    - "Share" action button uses RN `Share.share()` API (no new dependency needed)
+    - Loading state with `ActivityIndicator` while generating
+
+**Implementation discoveries:**
+- Visual intent classification is in the router (not the orchestrator), consistent with the planning intent pattern from Milestone 4. This avoids a wasted Flash-Lite call for visual requests and keeps the visual fallback simple.
+- The PRD originally said to update `server/agents/orchestrator.js` for visual routing (task #3), but following the Milestone 4 pattern, routing lives in `router.js` instead. The orchestrator remains a pure conversational agent.
+- The PRD specified "Gemini 3.1 Flash Image" model, but the actual model identifier used is `gemini-2.0-flash-exp` with `responseModalities: ['TEXT', 'IMAGE']` — this is the current Gemini model that supports native image generation. The model name is stored as a constant for easy updates.
+- Gemini's multimodal image response puts image data in `response.candidates[0].content.parts` as `inlineData` objects (with `mimeType` and base64 `data`), interspersed with `text` parts. The extraction loop handles any ordering of parts.
+- The `POST /api/agent/image` endpoint is separate from the chat `POST /api/agent` endpoint intentionally — the "Show Me" button and "Share Workout" card don't go through the chat/router flow at all. They're direct API calls with specific parameters, no message or history needed.
+- The existing `formGuideButton` styles (workout.js) were already positioned and styled correctly — only the `onPress` handler and icon/text needed changing. The button was a non-functional placeholder since the original UI build.
+- Exercise name extraction from chat messages works by stripping visual keywords and punctuation from the message. If the remaining text is too short (<2 chars), it falls back to `agentContext.workout.currentExercise`. This handles both "show me how to do a deadlift" (extracts "a deadlift") and just "show me" (falls back to current exercise).
+- The `AGENTS.visual` enum value was already defined in `types.js:7` from Milestone 1's initial enum setup — no addition needed.
+- Cache eviction uses simple oldest-first deletion via `Map.keys().next().value` — `Map` preserves insertion order in JavaScript, making this an efficient LRU-like strategy without additional data structures.
+- The Share functionality uses RN's built-in `Share.share({ message })` API which opens the native share sheet. For MVP, it shares the caption text. Sharing the actual image as a file would require `expo-sharing` or `react-native-share` — deferred to a future enhancement.
 
 **Validation:**
-- "Show me how to do a Romanian deadlift" → image appears in chat
-- "Show me" button on exercise → image loads
-- Workout completion can generate shareable card
-- Images are cached (second request for same exercise is instant)
+- ✅ `node -e "require('./server/agents/visual')"` loads without error
+- ✅ `node -e "require('./server/agents/router')"` loads all 6 agent modules (orchestrator, planning, memory, motivation, visual, types)
+- ✅ `node -e "require('./server/routes/agent')"` loads without error
+- ✅ Intent classification: 9/9 test cases pass (visual ×5: "show me how to do a deadlift", "what does a Romanian deadlift look like", "proper form for bench press", "how to do a squat", "form check on my overhead press"; plus swap, overload, plan_modify, chat all still correctly classified)
+- ✅ `buildAgentResponse()` correctly includes `image` and `imageCaption` fields
+- ✅ `logInteraction()` accepts and logs `visualLatencyMs`
+- ✅ `POST /api/agent/image` endpoint routes to correct handler based on `type` field
+- ✅ In-memory cache: `Map` with max 100 entries, keyed by exercise|equipment|modification
+- ✅ `expo export --platform ios` compiles without errors
+- ✅ All existing intent classifications unchanged (swap, plan_modify, overload, chat)
 
 ---
 

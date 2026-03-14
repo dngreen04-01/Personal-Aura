@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, AppState,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
+  Image, Share,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -10,7 +11,7 @@ import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
 import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
-import { sendCoachMessage, sendAgentMessage } from '../lib/api';
+import { sendCoachMessage, sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
@@ -72,6 +73,10 @@ export default function WorkoutScreen() {
   const [exerciseMaxWeight, setExerciseMaxWeight] = useState(null);
   const [streakData, setStreakData] = useState(null);
   const [completedSessions, setCompletedSessions] = useState(null);
+  const [exerciseImage, setExerciseImage] = useState(null);
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  const [shareImage, setShareImage] = useState(null);
+  const [isShareLoading, setIsShareLoading] = useState(false);
   const inputRef = useRef(null);
   const weightInputRef = useRef(null);
 
@@ -85,6 +90,7 @@ export default function WorkoutScreen() {
       setPushSuggestion(null);
       setLastLoggedWeight(null);
       setIsEditingWeight(false);
+      setExerciseImage(null);
 
       (async () => {
         try {
@@ -222,6 +228,39 @@ export default function WorkoutScreen() {
   const completedSets = exercises.slice(0, currentExIdx).reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0) + (currentSet - 1);
   const grandTotalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
   const progressPercent = grandTotalSets > 0 ? Math.round((completedSets / grandTotalSets) * 100) : 0;
+
+  const handleShowMe = async () => {
+    if (exerciseImage) {
+      setExerciseImage(null);
+      return;
+    }
+    setIsImageLoading(true);
+    try {
+      const result = await generateExerciseImage(
+        currentExercise.name,
+        userProfile?.equipment || null,
+      );
+      setExerciseImage(result);
+    } catch (err) {
+      console.error('Image generation failed:', err.message);
+      setAiResponse({ text: 'Could not generate image right now.' });
+    } finally {
+      setIsImageLoading(false);
+    }
+  };
+
+  const handleShareWorkout = async () => {
+    if (!completeStats) return;
+    setIsShareLoading(true);
+    try {
+      const result = await generateWorkoutCard(completeStats);
+      setShareImage(result);
+    } catch (err) {
+      console.error('Share card generation failed:', err.message);
+    } finally {
+      setIsShareLoading(false);
+    }
+  };
 
   const handleSend = async () => {
     const text = inputText.trim();
@@ -442,11 +481,31 @@ export default function WorkoutScreen() {
                 <Text style={styles.targetX}> × </Text>
                 <Text style={styles.targetNumber}>{targetReps}<Text style={styles.targetUnit}>Reps</Text></Text>
               </View>
-              <TouchableOpacity style={styles.formGuideButton}>
-                <MaterialIcons name="info-outline" size={16} color={colors.primary} />
-                <Text style={styles.formGuideText}>Form Guide</Text>
+              <TouchableOpacity style={styles.formGuideButton} onPress={handleShowMe} activeOpacity={0.7}>
+                {isImageLoading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <MaterialIcons name={exerciseImage ? 'visibility-off' : 'visibility'} size={16} color={colors.primary} />
+                )}
+                <Text style={styles.formGuideText}>{exerciseImage ? 'Hide Demo' : 'Show Me'}</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Exercise Demo Image */}
+            {exerciseImage && (
+              <View style={styles.exerciseImageContainer}>
+                {exerciseImage.image && (
+                  <Image
+                    source={{ uri: exerciseImage.image }}
+                    style={styles.exerciseImage}
+                    resizeMode="contain"
+                  />
+                )}
+                {exerciseImage.caption ? (
+                  <Text style={styles.exerciseImageCaption}>{exerciseImage.caption}</Text>
+                ) : null}
+              </View>
+            )}
 
             {/* Adjusters */}
             <View style={styles.adjustCard}>
@@ -695,6 +754,41 @@ export default function WorkoutScreen() {
                 </View>
               )}
             </View>
+
+            {/* Share Workout Card */}
+            {shareImage?.image ? (
+              <View style={styles.shareImageContainer}>
+                <Image
+                  source={{ uri: shareImage.image }}
+                  style={styles.shareImage}
+                  resizeMode="contain"
+                />
+                <TouchableOpacity
+                  style={styles.shareActionButton}
+                  onPress={() => Share.share({ message: shareImage.caption || 'Crushed my workout with Aura!' })}
+                  activeOpacity={0.7}
+                >
+                  <MaterialIcons name="share" size={18} color={colors.bgDark} />
+                  <Text style={styles.shareActionText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.shareButton}
+                onPress={handleShareWorkout}
+                disabled={isShareLoading}
+                activeOpacity={0.7}
+              >
+                {isShareLoading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <MaterialIcons name="share" size={18} color={colors.primary} />
+                    <Text style={styles.shareButtonText}>Share Workout</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            )}
 
             <TouchableOpacity style={styles.completeFinishButton} onPress={() => router.back()} activeOpacity={0.85}>
               <Text style={styles.completeFinishText}>FINISH</Text>
@@ -1059,5 +1153,43 @@ const styles = StyleSheet.create({
   },
   rpeDescriptionBold: {
     fontFamily: 'Inter_700Bold',
+  },
+
+  // Exercise demo image
+  exerciseImageContainer: {
+    width: '100%', maxWidth: 340, borderRadius: radius.lg,
+    backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.borderSubtle,
+    overflow: 'hidden',
+  },
+  exerciseImage: {
+    width: '100%', height: 280, backgroundColor: colors.bgDarker,
+  },
+  exerciseImageCaption: {
+    fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary,
+    padding: spacing.md, lineHeight: 19,
+  },
+
+  // Share workout
+  shareButton: {
+    width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: spacing.sm, paddingVertical: 14, borderRadius: radius.lg,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.3)', backgroundColor: 'rgba(212,255,0,0.05)',
+  },
+  shareButtonText: {
+    fontSize: 14, fontFamily: 'Inter_700Bold', color: colors.primary,
+  },
+  shareImageContainer: {
+    width: '100%', alignItems: 'center', gap: spacing.sm,
+  },
+  shareImage: {
+    width: '100%', height: 320, borderRadius: radius.md,
+  },
+  shareActionButton: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    borderRadius: radius.full, backgroundColor: colors.primary,
+  },
+  shareActionText: {
+    fontSize: 13, fontFamily: 'Inter_700Bold', color: colors.bgDark,
   },
 });

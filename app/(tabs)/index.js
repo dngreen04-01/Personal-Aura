@@ -11,6 +11,7 @@ import { sendCoachMessage, sendAgentMessage, submitPlanRegeneration } from '../.
 import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
+import ImageMessage from '../../components/ImageMessage';
 
 export default function ChatScreen() {
   const router = useRouter();
@@ -136,6 +137,8 @@ export default function ChatScreen() {
           text: data.text,
           functionCall: data.functionCall,
           swapSuggestion: data.swapSuggestion,
+          image: data.image,
+          imageCaption: data.imageCaption,
         },
       ]);
     } catch (err) {
@@ -302,6 +305,11 @@ export default function ChatScreen() {
                       swap={msg.swapSuggestion}
                       onSwap={(newName) => handleSwapExercise(msg.swapSuggestion.original_exercise, newName)}
                     />
+                  )}
+
+                  {/* Show exercise image */}
+                  {msg.image && (
+                    <ImageMessage image={msg.image} caption={msg.imageCaption} />
                   )}
                 </View>
               </View>
