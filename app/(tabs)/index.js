@@ -253,87 +253,88 @@ export default function ChatScreen() {
         </View>
       )}
 
-      {/* Chat Feed */}
-      <ScrollView
-        ref={scrollRef}
-        style={styles.chatArea}
-        contentContainerStyle={styles.chatContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
-        {messages.map((msg, i) => (
-          <View key={i} style={{ marginBottom: spacing.md }}>
-            {msg.role === 'user' ? (
-              <View style={styles.userRow}>
-                <View style={styles.userBubble}>
-                  <Text style={styles.userText}>{msg.text}</Text>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.auraRow}>
-                <View style={styles.avatar}>
-                  <MaterialIcons name="bolt" size={16} color={colors.bgDark} />
-                </View>
-                <View style={styles.auraContent}>
-                  <Text style={styles.auraLabel}>AURA</Text>
-                  <View style={styles.auraBubble}>
-                    <Text style={styles.auraText}>{formatBold(msg.text)}</Text>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+        {/* Chat Feed */}
+        <ScrollView
+          ref={scrollRef}
+          style={styles.chatArea}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
+          {messages.map((msg, i) => (
+            <View key={i} style={{ marginBottom: spacing.md }}>
+              {msg.role === 'user' ? (
+                <View style={styles.userRow}>
+                  <View style={styles.userBubble}>
+                    <Text style={styles.userText}>{msg.text}</Text>
                   </View>
-
-                  {/* Show logged set widget */}
-                  {msg.functionCall && (
-                    <View style={styles.setCard}>
-                      <Text style={styles.setCardLabel}>SET LOGGED</Text>
-                      <Text style={styles.setCardExercise}>{msg.functionCall.exercise_id}</Text>
-                      <View style={styles.setCardStats}>
-                        <StatPill label="Weight" value={`${msg.functionCall.weight}${msg.functionCall.weight_unit}`} />
-                        <StatPill label="Reps" value={msg.functionCall.reps} />
-                        {msg.functionCall.rpe && <StatPill label="RPE" value={msg.functionCall.rpe} />}
-                      </View>
-                    </View>
-                  )}
-
-                  {/* Show swap exercise widget */}
-                  {msg.swapSuggestion && (
-                    <SwapExerciseWidget
-                      swap={msg.swapSuggestion}
-                      onSwap={(newName) => handleSwapExercise(msg.swapSuggestion.original_exercise, newName)}
-                    />
-                  )}
-
-                  {/* Show exercise image */}
-                  {msg.image && (
-                    <ImageMessage image={msg.image} caption={msg.imageCaption} />
-                  )}
                 </View>
-              </View>
-            )}
-          </View>
-        ))}
+              ) : (
+                <View style={styles.auraRow}>
+                  <View style={styles.avatar}>
+                    <MaterialIcons name="bolt" size={16} color={colors.bgDark} />
+                  </View>
+                  <View style={styles.auraContent}>
+                    <Text style={styles.auraLabel}>AURA</Text>
+                    <View style={styles.auraBubble}>
+                      <Text style={styles.auraText}>{formatBold(msg.text)}</Text>
+                    </View>
 
-        {/* Workout Card */}
-        {todayWorkout && messages.length >= 2 && (
-          <WorkoutCard
-            day={todayWorkout}
-            onStart={handleStartWorkout}
-            onChangeFocus={handleChangeFocus}
-            locations={locations}
-            selectedLocation={selectedLocation}
-            onLocationChange={setSelectedLocation}
-            onAddLocation={() => router.push('/locations')}
-          />
-        )}
+                    {/* Show logged set widget */}
+                    {msg.functionCall && (
+                      <View style={styles.setCard}>
+                        <Text style={styles.setCardLabel}>SET LOGGED</Text>
+                        <Text style={styles.setCardExercise}>{msg.functionCall.exercise_id}</Text>
+                        <View style={styles.setCardStats}>
+                          <StatPill label="Weight" value={`${msg.functionCall.weight}${msg.functionCall.weight_unit}`} />
+                          <StatPill label="Reps" value={msg.functionCall.reps} />
+                          {msg.functionCall.rpe && <StatPill label="RPE" value={msg.functionCall.rpe} />}
+                        </View>
+                      </View>
+                    )}
 
-        {isLoading && (
-          <View style={styles.loadingRow}>
-            <View style={styles.loadingDot} />
-            <Text style={styles.loadingText}>Aura is thinking...</Text>
-          </View>
-        )}
-      </ScrollView>
+                    {/* Show swap exercise widget */}
+                    {msg.swapSuggestion && (
+                      <SwapExerciseWidget
+                        swap={msg.swapSuggestion}
+                        onSwap={(newName) => handleSwapExercise(msg.swapSuggestion.original_exercise, newName)}
+                      />
+                    )}
 
-      {/* Input */}
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+                    {/* Show exercise image */}
+                    {msg.image && (
+                      <ImageMessage image={msg.image} caption={msg.imageCaption} />
+                    )}
+                  </View>
+                </View>
+              )}
+            </View>
+          ))}
+
+          {/* Workout Card */}
+          {todayWorkout && messages.length >= 2 && (
+            <WorkoutCard
+              day={todayWorkout}
+              onStart={handleStartWorkout}
+              onChangeFocus={handleChangeFocus}
+              locations={locations}
+              selectedLocation={selectedLocation}
+              onLocationChange={setSelectedLocation}
+              onAddLocation={() => router.push('/locations')}
+            />
+          )}
+
+          {isLoading && (
+            <View style={styles.loadingRow}>
+              <View style={styles.loadingDot} />
+              <Text style={styles.loadingText}>Aura is thinking...</Text>
+            </View>
+          )}
+        </ScrollView>
+
+        {/* Input */}
         <View style={styles.inputArea}>
           <View style={styles.inputRow}>
             <View style={styles.inputWrapper}>
@@ -470,7 +471,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: colors.textPrimary, letterSpacing: -0.3 },
   chatArea: { flex: 1 },
-  chatContent: { padding: spacing.md, paddingBottom: 120 },
+  chatContent: { padding: spacing.md, paddingBottom: spacing.md },
 
   // Aura
   auraRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
