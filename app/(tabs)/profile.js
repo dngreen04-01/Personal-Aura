@@ -57,6 +57,16 @@ export default function ProfileScreen() {
                 <MaterialIcons name="chevron-right" size={20} color={colors.textSecondary} />
               </View>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/shared-locations')}>
+              <View style={styles.card}>
+                <MaterialIcons name="explore" size={20} color={colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardLabel}>Nearby Gyms</Text>
+                  <Text style={styles.cardValue}>Discover & contribute equipment info</Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={20} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => router.push('/exercises')}>
               <View style={styles.card}>
                 <MaterialIcons name="menu-book" size={20} color={colors.primary} />

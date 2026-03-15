@@ -235,6 +235,108 @@ async function getExerciseAlternatives(exerciseId) {
   return results;
 }
 
+// --- Shared Locations ---
+
+async function getSharedLocations({ lat, lon, radiusKm = 25, search, limit = 50 } = {}) {
+  const { calculateDistance } = require('./geoUtils');
+  const snap = await db.collection('sharedLocations').get();
+  let locations = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // Filter by distance if coordinates provided
+  if (lat != null && lon != null) {
+    locations = locations
+      .map(loc => ({
+        ...loc,
+        distance: calculateDistance(lat, lon, loc.lat, loc.lon),
+      }))
+      .filter(loc => loc.distance <= radiusKm)
+      .sort((a, b) => a.distance - b.distance);
+  }
+
+  // Text search on name/address
+  if (search) {
+    const term = search.toLowerCase();
+    locations = locations.filter(
+      loc =>
+        (loc.name || '').toLowerCase().includes(term) ||
+        (loc.address || '').toLowerCase().includes(term)
+    );
+  }
+
+  return locations.slice(0, limit);
+}
+
+async function getSharedLocationById(locationId) {
+  const snap = await db.doc(`sharedLocations/${locationId}`).get();
+  if (!snap.exists) return null;
+  return { id: snap.id, ...snap.data() };
+}
+
+async function createSharedLocation({ name, address, lat, lon, equipment, createdBy }) {
+  const ref = db.collection('sharedLocations').doc();
+  const now = new Date().toISOString();
+  await ref.set({
+    name,
+    address: address || '',
+    lat,
+    lon,
+    equipment: equipment || [],
+    contributors: [createdBy],
+    verified: false,
+    equipmentVotes: {},
+    missingVotes: {},
+    createdBy,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return { id: ref.id };
+}
+
+async function addEquipmentContribution(locationId, uid, equipmentId) {
+  const ref = db.doc(`sharedLocations/${locationId}`);
+  await ref.update({
+    equipment: admin.firestore.FieldValue.arrayUnion(equipmentId),
+    contributors: admin.firestore.FieldValue.arrayUnion(uid),
+    [`equipmentVotes.${equipmentId}`]: admin.firestore.FieldValue.arrayUnion(uid),
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+async function reportMissingEquipment(locationId, uid, equipmentId) {
+  const ref = db.doc(`sharedLocations/${locationId}`);
+  const snap = await ref.get();
+  if (!snap.exists) return;
+
+  const data = snap.data();
+  const missingVotes = data.missingVotes || {};
+  const voters = missingVotes[equipmentId] || [];
+
+  if (voters.includes(uid)) return; // Already reported
+
+  const updatedVoters = [...voters, uid];
+  const update = {
+    [`missingVotes.${equipmentId}`]: updatedVoters,
+    updatedAt: new Date().toISOString(),
+  };
+
+  // Auto-remove equipment at 2+ votes
+  if (updatedVoters.length >= 2) {
+    update.equipment = admin.firestore.FieldValue.arrayRemove(equipmentId);
+  }
+
+  await ref.update(update);
+}
+
+async function claimSharedLocation(locationId, uid) {
+  const ref = db.doc(`sharedLocations/${locationId}`);
+  await ref.update({
+    contributors: admin.firestore.FieldValue.arrayUnion(uid),
+    updatedAt: new Date().toISOString(),
+  });
+  const snap = await ref.get();
+  return { id: snap.id, ...snap.data() };
+}
+
 // --- Utilities ---
 
 function formatDate(date) {
@@ -261,4 +363,10 @@ module.exports = {
   getExerciseById,
   getExercisesByNames,
   getExerciseAlternatives,
+  getSharedLocations,
+  getSharedLocationById,
+  createSharedLocation,
+  addEquipmentContribution,
+  reportMissingEquipment,
+  claimSharedLocation,
 };

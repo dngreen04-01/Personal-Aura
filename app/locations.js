@@ -9,34 +9,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
 import {
   getLocations, saveLocation, updateLocation, deleteLocation, setDefaultLocation,
+  linkLocationToShared,
 } from '../lib/database';
-
-const EQUIPMENT_CATEGORIES = [
-  { category: 'Free Weights', items: [
-    { id: 'barbell', label: 'Barbell' },
-    { id: 'dumbbells', label: 'Dumbbells' },
-    { id: 'ez_curl_bar', label: 'EZ Curl Bar' },
-    { id: 'kettlebells', label: 'Kettlebells' },
-  ]},
-  { category: 'Machines', items: [
-    { id: 'cable_machine', label: 'Cable Machine' },
-    { id: 'smith_machine', label: 'Smith Machine' },
-    { id: 'leg_press', label: 'Leg Press' },
-    { id: 'lat_pulldown', label: 'Lat Pulldown' },
-    { id: 'chest_press', label: 'Chest Press Machine' },
-    { id: 'leg_curl', label: 'Leg Curl Machine' },
-    { id: 'leg_extension', label: 'Leg Extension' },
-  ]},
-  { category: 'Bodyweight & Other', items: [
-    { id: 'pull_up_bar', label: 'Pull-up Bar' },
-    { id: 'dip_bars', label: 'Dip Bars' },
-    { id: 'bench', label: 'Bench (Flat/Incline)' },
-    { id: 'resistance_bands', label: 'Resistance Bands' },
-    { id: 'trx', label: 'TRX / Suspension Trainer' },
-  ]},
-];
-
-const ALL_EQUIPMENT_IDS = EQUIPMENT_CATEGORIES.flatMap(c => c.items.map(i => i.id));
+import { createSharedLocation } from '../lib/api';
+import { EQUIPMENT_CATEGORIES } from '../lib/equipmentData';
 
 export default function LocationsScreen() {
   const router = useRouter();
@@ -45,6 +21,7 @@ export default function LocationsScreen() {
   const [editingLocation, setEditingLocation] = useState(null);
   const [locationName, setLocationName] = useState('');
   const [selectedEquipment, setSelectedEquipment] = useState([]);
+  const [shareWithCommunity, setShareWithCommunity] = useState(false);
 
   const loadLocations = useCallback(async () => {
     try {
@@ -61,6 +38,7 @@ export default function LocationsScreen() {
     setEditingLocation(null);
     setLocationName('');
     setSelectedEquipment([]);
+    setShareWithCommunity(false);
     setModalVisible(true);
   };
 
@@ -84,7 +62,24 @@ export default function LocationsScreen() {
       if (editingLocation) {
         await updateLocation(editingLocation.id, name, selectedEquipment);
       } else {
-        await saveLocation(name, selectedEquipment, locations.length === 0);
+        const localId = await saveLocation(name, selectedEquipment, locations.length === 0);
+        // Share with community if toggled
+        if (shareWithCommunity) {
+          try {
+            const result = await createSharedLocation({
+              name,
+              address: '',
+              lat: 0,
+              lon: 0,
+              equipment: selectedEquipment,
+            });
+            if (result.id) {
+              await linkLocationToShared(localId, result.id);
+            }
+          } catch (shareErr) {
+            console.warn('Failed to share location:', shareErr.message);
+          }
+        }
       }
       setModalVisible(false);
       await loadLocations();
@@ -134,6 +129,19 @@ export default function LocationsScreen() {
         <View style={styles.headerButton} />
       </View>
 
+      {/* Find Nearby Gyms */}
+      <View style={styles.nearbySection}>
+        <TouchableOpacity
+          style={styles.nearbyButton}
+          onPress={() => router.push('/shared-locations')}
+          activeOpacity={0.85}
+        >
+          <MaterialIcons name="explore" size={20} color={colors.primary} />
+          <Text style={styles.nearbyButtonText}>Find Nearby Gyms</Text>
+          <MaterialIcons name="chevron-right" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+
       {/* Location List */}
       <ScrollView style={styles.listArea} contentContainerStyle={styles.listContent}>
         {locations.length === 0 && (
@@ -150,6 +158,9 @@ export default function LocationsScreen() {
               <View style={styles.cardTitleRow}>
                 <MaterialIcons name="location-on" size={20} color={colors.primary} />
                 <Text style={styles.cardName}>{loc.name}</Text>
+                {loc.shared_location_id && (
+                  <MaterialIcons name="people" size={16} color={colors.primaryDim} />
+                )}
                 {loc.is_default === 1 && (
                   <View style={styles.defaultBadge}>
                     <Text style={styles.defaultBadgeText}>DEFAULT</Text>
@@ -210,6 +221,29 @@ export default function LocationsScreen() {
                 onChangeText={setLocationName}
                 autoFocus={!editingLocation}
               />
+
+              {/* Share with Community Toggle */}
+              {!editingLocation && (
+                <TouchableOpacity
+                  style={styles.shareToggle}
+                  onPress={() => setShareWithCommunity(prev => !prev)}
+                >
+                  <MaterialIcons
+                    name={shareWithCommunity ? 'check-circle' : 'radio-button-unchecked'}
+                    size={22}
+                    color={shareWithCommunity ? colors.primary : colors.textSecondary}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[
+                      styles.shareToggleText,
+                      shareWithCommunity && { color: colors.primary },
+                    ]}>Share with community</Text>
+                    <Text style={styles.shareToggleSubtext}>
+                      Other users can find and contribute to this gym
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
 
               {/* Equipment Checklist */}
               <Text style={[styles.fieldLabel, { marginTop: spacing.lg }]}>AVAILABLE EQUIPMENT</Text>
@@ -346,4 +380,27 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.lg, marginTop: spacing.md,
   },
   saveButtonText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: colors.bgDark },
+
+  nearbySection: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  nearbyButton: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    padding: spacing.md, borderRadius: radius.md,
+    backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.borderLight,
+  },
+  nearbyButtonText: {
+    flex: 1, fontSize: 15, fontFamily: 'Inter_600SemiBold', color: colors.textPrimary,
+  },
+
+  shareToggle: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingVertical: spacing.md, marginTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.borderSubtle,
+    marginBottom: spacing.sm,
+  },
+  shareToggleText: {
+    fontSize: 15, fontFamily: 'Inter_600SemiBold', color: colors.textSecondary,
+  },
+  shareToggleSubtext: {
+    fontSize: 12, fontFamily: 'Inter_400Regular', color: colors.textMuted, marginTop: 2,
+  },
 });

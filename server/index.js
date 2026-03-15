@@ -12,6 +12,7 @@ const onboardingRouter = require('./routes/onboarding');
 const progressRouter = require('./routes/progress');
 const programmerRouter = require('./routes/programmer');
 const jobRouter = require('./routes/jobs');
+const locationsRouter = require('./routes/locations');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -38,6 +39,7 @@ app.use('/api/exercises', authMiddleware, generalRateLimit, exercisesRouter);
 app.use('/api/onboarding', authMiddleware, aiRateLimit, onboardingRouter);
 app.use('/api/progress', authMiddleware, generalRateLimit, progressRouter);
 app.use('/api/programmer', authMiddleware, aiRateLimit, programmerRouter);
+app.use('/api/locations', authMiddleware, generalRateLimit, locationsRouter);
 
 // Centralized error handler — must be registered last
 app.use(errorHandler);
