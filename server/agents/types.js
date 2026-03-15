@@ -11,7 +11,7 @@ const AGENTS = {
 /**
  * Build a standardized agent response (superset of coach response shape).
  */
-function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, planModification = null, overloadSuggestion = null, motivationDirective = null, image = null, imageCaption = null, agentsUsed = [], latency = {} }) {
+function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, planModification = null, overloadSuggestion = null, motivationDirective = null, image = null, imageCaption = null, workoutCard = null, agentsUsed = [], latency = {} }) {
   return {
     text,
     functionCall,
@@ -21,6 +21,7 @@ function buildAgentResponse({ text, functionCall = null, swapSuggestion = null, 
     motivationDirective,
     image,
     imageCaption,
+    workoutCard,
     agentsUsed,
     latency,
   };

@@ -1,5 +1,5 @@
 const { handleMessage } = require('./orchestrator');
-const { handleSwapRequest, handlePlanModification, handleProgressiveOverload } = require('./planning');
+const { handleSwapRequest, handlePlanModification, handleProgressiveOverload, handleWorkoutModification } = require('./planning');
 const { generateExerciseDemo } = require('./visual');
 const { buildAgentContext } = require('./memory');
 const { AGENTS, buildAgentResponse, logInteraction } = require('./types');
@@ -28,26 +28,49 @@ const TIMEOUTS = {
 
 /**
  * Classify user intent via keyword matching (<1ms).
- * Returns: 'swap' | 'plan_modify' | 'overload' | 'chat'
+ * Returns: 'ready' | 'swap' | 'injury' | 'replace' | 'modify' | 'overload' | 'visual' | 'chat'
  */
 function classifyIntent(message) {
   const lower = (message || '').toLowerCase();
 
-  // Swap: explicit swap requests + pain/injury signals
-  const swapKw = ['swap', 'replace', 'alternative', 'substitute', 'switch exercise',
-    'different exercise', "can't do", 'hurts', 'injured', 'injury', 'pain'];
+  // Ready: user accepts workout — check FIRST (highest priority for short phrases)
+  const readyKw = ["let's go", "ready", "i'm good", "sounds good", "let's do it",
+    "start", "begin", "perfect", "looks good", "good to go", "yes", "yeah", "yep"];
+  if (readyKw.some(k => lower.includes(k))) return 'ready';
+
+  // Swap: explicit swap requests
+  const swapKw = ['swap', 'alternative', 'substitute', 'switch exercise',
+    'different exercise', "can't do"];
   if (swapKw.some(k => lower.includes(k))) return 'swap';
 
-  // Plan modification: workout-level changes, custom requests, equipment-specific workouts
-  const planKw = ['modify plan', 'change plan', 'change my workout', 'change the workout',
-    'change today', 'custom workout', 'make me a', 'make a workout', 'build me a',
-    'different workout', 'new workout', 'want to do', 'rather do', 'instead do',
+  // Injury/fatigue: adapt workout
+  const injuryKw = ["shoulder hurts", "feeling tired", "didn't sleep", "sore from",
+    "low energy", "minor injury", "my back", "my knee", "tweaked", "pain in",
+    "hurts", "injured", "fatigue", "exhausted", "not feeling great"];
+  if (injuryKw.some(k => lower.includes(k))) return 'injury';
+
+  // Replace: completely different workout (check BEFORE modify)
+  const replaceKw = ['completely different', 'skip the plan', 'something else entirely',
+    'different type of workout', 'outdoor workout', 'want to do yoga',
+    'scrap this', 'different workout', 'change everything'];
+  if (replaceKw.some(k => lower.includes(k))) return 'replace';
+
+  // Modify: tweak existing workout (merged from old plan_modify)
+  const modifyKw = ['make it shorter', 'make it longer', 'fewer sets', 'more sets',
+    'fewer exercises', 'more exercises', 'less rest', 'more rest', 'lighter',
+    'heavier', 'easier', 'harder', 'modify', 'adjust', 'change', 'shorten',
+    'add more', 'remove', 'less volume', 'more volume', 'quick workout',
+    // Include old plan_modify keywords too
+    'change my plan', 'modify plan', 'update plan', 'adjust plan',
+    'change my workout', 'change the workout', 'change today',
+    'custom workout', 'make me a', 'make a workout', 'build me a',
+    'new workout', 'want to do', 'rather do', 'instead do',
     'easier workout', 'harder workout', 'shorter workout', 'longer workout',
     'lighter today', 'today lighter', 'make today', 'heavier today', 'today heavier',
     'easier today', 'today easier', 'at home', 'no equipment',
     'only have', 'just have', 'kettlebell', 'dumbbell only', 'bodyweight only',
     'minute workout', 'min workout'];
-  if (planKw.some(k => lower.includes(k))) return 'plan_modify';
+  if (modifyKw.some(k => lower.includes(k))) return 'modify';
 
   // Progressive overload: weight progression queries
   const overloadKw = ['go heavier', 'increase weight', 'add weight', 'weight progression',
@@ -65,8 +88,10 @@ function classifyIntent(message) {
 /** Map intent to the appropriate planning handler */
 const PLANNING_HANDLERS = {
   swap: handleSwapRequest,
-  plan_modify: handlePlanModification,
+  modify: handlePlanModification,
   overload: handleProgressiveOverload,
+  replace: handleWorkoutModification,
+  injury: handleWorkoutModification,
 };
 
 /**
@@ -78,6 +103,23 @@ async function routeRequest({ message, history, userContext }) {
   const startTime = Date.now();
 
   const intent = classifyIntent(message);
+
+  // --- Ready intent: deterministic response, no LLM needed ---
+  if (intent === 'ready') {
+    const exercises = userContext.currentDay?.exercises || [];
+    return buildAgentResponse({
+      text: "Let's crush it! Here's your workout:",
+      workoutCard: {
+        focus: userContext.currentDay?.focus || 'Workout',
+        exercises,
+        estimatedDuration: Math.max(30, exercises.length * 8),
+        modificationType: 'original',
+      },
+      agentsUsed: [AGENTS.memory],
+      latency: { total: Date.now() - startTime },
+    });
+  }
+
   const planningHandler = PLANNING_HANDLERS[intent];
 
   // --- Planning Agent path ---
@@ -106,6 +148,7 @@ async function routeRequest({ message, history, userContext }) {
         swapSuggestion: result.swapSuggestion || null,
         planModification: result.planModification || null,
         overloadSuggestion: result.overloadSuggestion || null,
+        workoutCard: result.workoutCard || null,
         agentsUsed: [AGENTS.orchestrator, AGENTS.memory, AGENTS.planning],
         latency: {
           planning: planningLatency,

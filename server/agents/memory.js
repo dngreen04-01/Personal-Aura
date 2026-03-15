@@ -109,4 +109,27 @@ Write 2-3 sentences. Reference specific stats (volume, exercises, sets). Be genu
 `;
 }
 
-module.exports = { buildAgentContext, formatContextBlock, formatCompletionDirective };
+/**
+ * Build a greeting context string from user data for the pre-workout greeting.
+ * Pure function — formats the data for the greeting system prompt.
+ */
+function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWorkoutDate, todayFocus, todayExerciseCount, goal, equipment }) {
+  const parts = [];
+
+  if (goal) parts.push(`User's goal: ${goal}`);
+  if (equipment) parts.push(`Available equipment: ${equipment}`);
+  if (sessionCount) parts.push(`Sessions completed: ${sessionCount}`);
+  if (streak && streak.current > 0) parts.push(`Current streak: ${streak.current} days`);
+  if (lastWorkoutFocus) {
+    const lastDate = lastWorkoutDate ? ` on ${new Date(lastWorkoutDate).toLocaleDateString()}` : '';
+    parts.push(`Last workout: ${lastWorkoutFocus}${lastDate}`);
+  }
+  if (todayFocus) {
+    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises` : '';
+    parts.push(`Today's scheduled workout: ${todayFocus}${exerciseInfo}`);
+  }
+
+  return parts.length > 0 ? `User Context:\n${parts.join('\n')}` : '';
+}
+
+module.exports = { buildAgentContext, formatContextBlock, formatCompletionDirective, buildGreetingContext };

@@ -202,6 +202,86 @@ You MUST respond with valid JSON matching this exact schema:
 }
 
 /**
+ * Handle workout modification or replacement requests.
+ * Supports two call shapes:
+ *   - From router: argsOrMessage is a string (user's message)
+ *   - From orchestrator: argsOrMessage is an object with modification_type
+ */
+async function handleWorkoutModification(argsOrMessage, agentContext) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY missing');
+
+  const isFromOrchestrator = typeof argsOrMessage === 'object' && argsOrMessage.modification_type;
+
+  let modificationType, instructions, currentExercises;
+
+  if (isFromOrchestrator) {
+    modificationType = argsOrMessage.modification_type;
+    instructions = argsOrMessage.instructions;
+    currentExercises = argsOrMessage.current_exercises || agentContext.workout?.exercises || [];
+  } else {
+    // From router — argsOrMessage is the user's message string
+    instructions = typeof argsOrMessage === 'string' ? argsOrMessage : argsOrMessage.message || '';
+    currentExercises = agentContext.workout?.exercises || [];
+    // Determine type from context
+    modificationType = instructions.toLowerCase().includes('completely different') ||
+                       instructions.toLowerCase().includes('something else') ? 'replace' : 'adjust';
+  }
+
+  const contextBlock = agentContext.workout ?
+    `Current workout: ${agentContext.workout.day || 'General'}\nExercises: ${JSON.stringify(currentExercises)}` : '';
+
+  const systemPrompt = `${BASE_IDENTITY}
+
+Your task: ${modificationType === 'replace'
+    ? 'Generate a completely new workout session based on the user\'s request. Ignore the current workout plan entirely.'
+    : 'Modify the current workout based on user constraints. Keep the same general focus but adjust as requested.'}
+
+User's equipment: ${agentContext.user?.equipment || 'full gym'}
+User's goal: ${agentContext.user?.goal || 'general fitness'}
+${contextBlock}
+
+User's request: ${instructions}
+
+You MUST respond with valid JSON matching this exact schema:
+{
+  "text": "Brief confirmation message (1-2 sentences)",
+  "workoutCard": {
+    "focus": "Updated focus label",
+    "exercises": [{ "name": "Exercise Name", "sets": 3, "reps": "8-10", "targetWeight": null, "restSeconds": 90 }],
+    "estimatedDuration": 45,
+    "modificationType": "${modificationType}"
+  }
+}`;
+
+  const userPrompt = `${instructions}\n\n${contextBlock}`;
+
+  try {
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        responseMimeType: 'application/json',
+      },
+    });
+
+    const parsed = JSON.parse(response.text);
+    return {
+      text: parsed.text,
+      workoutCard: parsed.workoutCard,
+    };
+  } catch (error) {
+    console.error('Workout modification error:', error);
+    return {
+      text: "I had trouble modifying the workout. Let me know what you'd like to change and I'll try again.",
+      workoutCard: null,
+    };
+  }
+}
+
+/**
  * Handle full plan regeneration (called by programmer route).
  * Analyzes workout history and generates an updated plan with progressive overload.
  */
@@ -267,4 +347,4 @@ Analyze the workout history, detect plateaus, apply progressive overload based o
   return JSON.parse(response.text);
 }
 
-module.exports = { handleSwapRequest, handlePlanModification, handleProgressiveOverload, handlePlanRegeneration };
+module.exports = { handleSwapRequest, handlePlanModification, handleProgressiveOverload, handleWorkoutModification, handlePlanRegeneration };

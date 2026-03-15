@@ -8,6 +8,21 @@ function buildSystemPrompt(agentContext) {
   const contextBlock = formatContextBlock(agentContext);
   const completionDirective = formatCompletionDirective(agentContext);
 
+  const isPreWorkout = !agentContext.workout.sessionId;
+
+  if (isPreWorkout) {
+    return `You are Aura, a warm and motivating personal training agent. You are chatting with the user BEFORE their workout.
+${contextBlock}
+Your Core Directives:
+1. Be conversational and warm. 2-3 sentences. Ask questions, acknowledge preferences.
+2. When the user is ready to start, confirm and present the workout.
+3. When the user wants modifications (shorter, different focus, injury, fatigue), call modify_workout with type "adjust".
+4. When the user wants something completely different, call modify_workout with type "replace".
+5. Exercise Swaps: Same as mid-workout — call suggest_swap with 3 alternatives. Provide 3 alternatives that target the same muscle groups. Mark the best overall alternative as recommended. Include a brief reason for each suggestion.
+
+Tone: Friendly, supportive, conversational.`;
+  }
+
   return `You are Aura, an elite, highly motivating personal training agent. You are currently speaking with the user during their workout.
 ${contextBlock}${completionDirective}
 Your Core Directives:
@@ -65,6 +80,20 @@ const logSetDeclaration = {
   },
 };
 
+const modifyWorkoutDeclaration = {
+  name: 'modify_workout',
+  description: 'Modifies or replaces the current workout based on user preferences, injuries, or fatigue.',
+  parameters: {
+    type: 'object',
+    properties: {
+      modification_type: { type: 'string', enum: ['adjust', 'replace'], description: 'adjust = tweak existing, replace = generate new' },
+      instructions: { type: 'string', description: 'What the user wants changed' },
+      current_exercises: { type: 'array', items: { type: 'object' }, description: 'Current workout exercises' },
+    },
+    required: ['modification_type', 'instructions'],
+  },
+};
+
 /**
  * Handle a coach message — extracted from the old POST handler.
  * Takes args directly (no req/res). Throws on error.
@@ -88,11 +117,16 @@ async function handleMessage({ message, history, userContext }) {
 
   const ai = new GoogleGenAI({ apiKey });
 
+  const isPreWorkout = !agentContext.workout.sessionId;
+  const declarations = isPreWorkout
+    ? [logSetDeclaration, suggestSwapDeclaration, modifyWorkoutDeclaration]
+    : [logSetDeclaration, suggestSwapDeclaration];
+
   const chat = ai.chats.create({
     model: MODEL_NAME,
     config: {
       systemInstruction: buildSystemPrompt(agentContext),
-      tools: [{ functionDeclarations: [logSetDeclaration, suggestSwapDeclaration] }],
+      tools: [{ functionDeclarations: declarations }],
     },
     history: validHistory,
   });
@@ -101,6 +135,7 @@ async function handleMessage({ message, history, userContext }) {
 
   let functionCallData = null;
   let swapData = null;
+  let workoutCardData = null;
   let textResponse = response.text;
 
   const calls = response.functionCalls;
@@ -149,6 +184,20 @@ async function handleMessage({ message, history, userContext }) {
         }],
       });
       textResponse = toolResult.text;
+    } else if (call.name === 'modify_workout') {
+      const { handleWorkoutModification } = require('./planning');
+      const modResult = await handleWorkoutModification(call.args, agentContext);
+
+      const toolResult = await chat.sendMessage({
+        message: [{
+          functionResponse: {
+            name: 'modify_workout',
+            response: { status: 'success', ...modResult.workoutCard },
+          },
+        }],
+      });
+      textResponse = toolResult.text;
+      workoutCardData = modResult.workoutCard;
     }
   }
 
@@ -156,6 +205,7 @@ async function handleMessage({ message, history, userContext }) {
     text: textResponse,
     functionCall: functionCallData,
     swapSuggestion: swapData,
+    workoutCard: workoutCardData,
   };
 }
 

@@ -1,4 +1,5 @@
 const express = require('express');
+const { GoogleGenAI } = require('@google/genai');
 const { routeRequest } = require('../agents/router');
 const { generateExerciseDemo, generateFormCheck, generateWorkoutCard } = require('../agents/visual');
 const { AGENTS } = require('../agents/types');
@@ -18,6 +19,49 @@ router.get('/health', (req, res) => {
     },
     timestamp: new Date().toISOString(),
   });
+});
+
+router.post('/greet', async (req, res) => {
+  try {
+    const { userContext } = req.body;
+    const { buildGreetingContext } = require('../agents/memory');
+
+    const greetingContext = buildGreetingContext(userContext);
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+
+    const systemPrompt = `You are Aura, a warm and motivating personal training coach. Generate a brief greeting (2-3 sentences) for the user before their workout.
+
+${greetingContext}
+
+Guidelines:
+- Reference the time of day naturally
+- If they have an active streak, mention it encouragingly (e.g., "3 days strong!")
+- Briefly reference their last workout's focus
+- Describe today's scheduled workout conversationally (focus, exercise count)
+- Ask if they're ready or want to adjust
+- Be warm, motivating, and concise`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-flash-lite-preview',
+      contents: 'Generate a greeting for the user before their workout.',
+      config: {
+        systemInstruction: systemPrompt,
+      },
+    });
+
+    const text = response.text;
+
+    res.json({ text });
+  } catch (error) {
+    console.error('Greeting error:', error);
+    res.status(500).json({ error: 'Failed to generate greeting' });
+  }
 });
 
 router.post('/', async (req, res) => {

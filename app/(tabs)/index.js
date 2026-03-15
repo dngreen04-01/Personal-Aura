@@ -7,11 +7,12 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
-import { sendAgentMessage, submitPlanRegeneration } from '../../lib/api';
-import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation } from '../../lib/database';
+import { sendAgentMessage, submitPlanRegeneration, greetUser } from '../../lib/api';
+import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation, getGreetingData } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
 import ImageMessage from '../../components/ImageMessage';
+import InlineWorkoutCard from '../../components/InlineWorkoutCard';
 
 export default function ChatScreen() {
   const router = useRouter();
@@ -53,12 +54,13 @@ export default function ChatScreen() {
 
   const loadPlanAndGreet = async () => {
     try {
-      const [savedPlan, profile, sessionCount, locs, defLoc] = await Promise.all([
+      const [savedPlan, profile, sessionCount, locs, defLoc, greetingData] = await Promise.all([
         getLatestPlan(),
         getUserProfile(),
         getCompletedSessionCount(),
         getLocations(),
         getDefaultLocation(),
+        getGreetingData(),
       ]);
 
       if (profile) setUserProfile(profile);
@@ -69,15 +71,29 @@ export default function ChatScreen() {
       if (savedPlan && Array.isArray(savedPlan)) {
         setPlan(savedPlan);
 
-        // Skip default workout selection if returning from change-focus
         if (!params.selectedDayJson) {
           const firstWorkout = savedPlan.find(d => !d.focus.toLowerCase().includes('rest'));
           setTodayWorkout(firstWorkout);
 
-          setMessages([
-            { role: 'model', text: `Great progress! You're into the **"Hypertrophy Foundations"** block.` },
-            { role: 'model', text: `Ready for today's session? We're focusing on **${firstWorkout?.focus || 'your workout'}**.` },
-          ]);
+          // AI greeting instead of static messages
+          try {
+            const greeting = await greetUser({
+              goal: profile?.goal,
+              equipment: profile?.equipment,
+              streak: greetingData.streak,
+              sessionCount: greetingData.sessionCount,
+              lastWorkoutFocus: greetingData.lastWorkoutFocus,
+              lastWorkoutDate: greetingData.lastWorkoutDate,
+              todayFocus: firstWorkout?.focus,
+              todayExerciseCount: firstWorkout?.exercises?.length,
+            });
+            setMessages([{ role: 'model', text: greeting.text }]);
+          } catch {
+            // Fallback to static greeting
+            setMessages([
+              { role: 'model', text: `Ready for today's session? We're focusing on **${firstWorkout?.focus || 'your workout'}**.` },
+            ]);
+          }
         }
       } else if (!params.selectedDayJson) {
         setMessages([{ role: 'model', text: "Welcome to Aura. What are we hitting today?" }]);
@@ -124,17 +140,31 @@ export default function ChatScreen() {
 
       const data = await sendAgentMessage(text, history, userContext);
 
-      setMessages(prev => [
-        ...prev,
-        {
-          role: 'model',
-          text: data.text,
-          functionCall: data.functionCall,
-          swapSuggestion: data.swapSuggestion,
-          image: data.image,
-          imageCaption: data.imageCaption,
-        },
-      ]);
+      const auraMsg = {
+        role: 'model',
+        text: data.text,
+        functionCall: data.functionCall,
+        swapSuggestion: data.swapSuggestion,
+        workoutCard: data.workoutCard,
+        image: data.image,
+        imageCaption: data.imageCaption,
+      };
+      setMessages(prev => [...prev, auraMsg]);
+
+      // If workoutCard received, update todayWorkout state
+      if (data.workoutCard) {
+        const wc = data.workoutCard;
+        setTodayWorkout({ focus: wc.focus, exercises: wc.exercises, day: todayWorkout?.day });
+
+        // Persist adjustments to DB
+        if (wc.modificationType === 'adjust' && plan) {
+          const updatedPlan = plan.map(day =>
+            day.day === todayWorkout?.day ? { ...day, exercises: wc.exercises, focus: wc.focus } : day
+          );
+          setPlan(updatedPlan);
+          await saveWorkoutPlan(updatedPlan);
+        }
+      }
     } catch (err) {
       console.error(err);
       setMessages(prev => [...prev, { role: 'model', text: "Couldn't reach Aura right now. Try again in a moment." }]);
@@ -307,24 +337,19 @@ export default function ChatScreen() {
                     {msg.image && (
                       <ImageMessage image={msg.image} caption={msg.imageCaption} />
                     )}
+
+                    {/* Show inline workout card */}
+                    {msg.workoutCard && (
+                      <InlineWorkoutCard
+                        workout={msg.workoutCard}
+                        onStart={handleStartWorkout}
+                      />
+                    )}
                   </View>
                 </View>
               )}
             </View>
           ))}
-
-          {/* Workout Card */}
-          {todayWorkout && messages.length >= 2 && (
-            <WorkoutCard
-              day={todayWorkout}
-              onStart={handleStartWorkout}
-              onChangeFocus={handleChangeFocus}
-              locations={locations}
-              selectedLocation={selectedLocation}
-              onLocationChange={setSelectedLocation}
-              onAddLocation={() => router.push('/locations')}
-            />
-          )}
 
           {isLoading && (
             <View style={styles.loadingRow}>
@@ -387,77 +412,6 @@ function StatPill({ label, value }) {
   );
 }
 
-function WorkoutCard({ day, onStart, onChangeFocus, locations, selectedLocation, onLocationChange, onAddLocation }) {
-  const exercisePreview = day.exercises
-    ? day.exercises.slice(0, 3).map(e => e.name).join(', ') + (day.exercises.length > 3 ? '...' : '')
-    : '';
-
-  const cycleLocation = () => {
-    if (!locations || locations.length === 0) {
-      onAddLocation();
-      return;
-    }
-    const currentIdx = selectedLocation ? locations.findIndex(l => l.id === selectedLocation.id) : -1;
-    const nextIdx = (currentIdx + 1) % locations.length;
-    onLocationChange(locations[nextIdx]);
-  };
-
-  return (
-    <View style={styles.workoutCard}>
-      {/* Hero */}
-      <View style={styles.cardHero}>
-        <MaterialIcons name="fitness-center" size={64} color="rgba(212,255,0,0.15)" />
-        <View style={styles.cardBadge}>
-          <Text style={styles.cardBadgeText}>DAILY TARGET</Text>
-        </View>
-      </View>
-
-      {/* Content */}
-      <View style={styles.cardBody}>
-        <Text style={styles.cardTitle}>{day.focus}</Text>
-        <View style={styles.cardMeta}>
-          <View style={styles.cardMetaItem}>
-            <MaterialIcons name="schedule" size={16} color={colors.textSecondary} />
-            <Text style={styles.cardMetaText}>
-              {day.exercises ? `${Math.max(30, day.exercises.length * 8)}-${Math.max(40, day.exercises.length * 10)} min` : '45-50 min'}
-            </Text>
-          </View>
-          <View style={styles.cardMetaItem}>
-            <MaterialIcons name="fitness-center" size={16} color={colors.textSecondary} />
-            <Text style={styles.cardMetaText}>{day.exercises ? `${day.exercises.length} Exercises` : 'Custom'}</Text>
-          </View>
-        </View>
-
-        {/* Location Selector */}
-        <TouchableOpacity style={styles.locationPicker} onPress={cycleLocation} activeOpacity={0.7}>
-          <MaterialIcons name="location-on" size={16} color={colors.primary} />
-          <Text style={styles.locationPickerText} numberOfLines={1}>
-            {selectedLocation ? selectedLocation.name : 'Select Location'}
-          </Text>
-          <MaterialIcons name="unfold-more" size={16} color={colors.textMuted} />
-        </TouchableOpacity>
-
-        {exercisePreview ? (
-          <View style={styles.previewBox}>
-            <Text style={styles.previewLabel}>PREVIEW</Text>
-            <Text style={styles.previewText}>{exercisePreview}</Text>
-          </View>
-        ) : null}
-
-        <TouchableOpacity style={styles.startButton} onPress={onStart} activeOpacity={0.8}>
-          <Text style={styles.startButtonText}>Start Workout</Text>
-          <MaterialIcons name="play-circle-fill" size={22} color={colors.bgDark} />
-        </TouchableOpacity>
-
-        <TouchableOpacity style={styles.changeFocusButton} onPress={onChangeFocus} activeOpacity={0.7}>
-          <MaterialIcons name="sync" size={18} color={colors.textMuted} />
-          <Text style={styles.changeFocusText}>CHANGE FOCUS</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bgDark },
   header: {
@@ -496,34 +450,6 @@ const styles = StyleSheet.create({
   loadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, backgroundColor: colors.bgCard, borderRadius: radius.md, alignSelf: 'flex-start' },
   loadingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
   loadingText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary },
-
-  // Workout Card
-  workoutCard: { marginLeft: spacing.xxl, borderRadius: radius.xl, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(212,255,0,0.2)', marginBottom: spacing.lg },
-  cardHero: { height: 160, backgroundColor: '#1a1d0a', justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  cardBadge: { position: 'absolute', bottom: 12, left: 12, backgroundColor: colors.primary, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 4 },
-  cardBadgeText: { fontSize: 10, fontFamily: 'Inter_800ExtraBold', color: colors.bgDark, letterSpacing: -0.3 },
-  cardBody: { padding: spacing.lg, gap: spacing.md, backgroundColor: 'rgba(15,23,42,0.4)' },
-  cardTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', color: colors.textPrimary, letterSpacing: -0.5 },
-  cardMeta: { flexDirection: 'row', gap: spacing.md },
-  cardMetaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cardMetaText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary },
-  locationPicker: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
-    borderRadius: radius.md, backgroundColor: 'rgba(212,255,0,0.05)',
-    borderWidth: 1, borderColor: 'rgba(212,255,0,0.1)',
-  },
-  locationPickerText: { flex: 1, fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textPrimary },
-  previewBox: { backgroundColor: colors.primaryGhost, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primaryGhost },
-  previewLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.textMuted, letterSpacing: 2, marginBottom: 4 },
-  previewText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic' },
-  startButton: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
-    backgroundColor: colors.primary, paddingVertical: spacing.md, borderRadius: radius.lg,
-  },
-  startButtonText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: colors.bgDark },
-  changeFocusButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
-  changeFocusText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textMuted, letterSpacing: 2 },
 
   // Regeneration banner
   regenBanner: {
