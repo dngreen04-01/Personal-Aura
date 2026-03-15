@@ -10,8 +10,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames } from '../lib/database';
 import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
+import ExerciseDetail from '../components/ExerciseDetail';
 import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
@@ -77,6 +78,8 @@ export default function WorkoutScreen() {
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [shareImage, setShareImage] = useState(null);
   const [isShareLoading, setIsShareLoading] = useState(false);
+  const [libraryExercise, setLibraryExercise] = useState(null);
+  const [showExerciseDetail, setShowExerciseDetail] = useState(false);
   const inputRef = useRef(null);
   const weightInputRef = useRef(null);
 
@@ -91,6 +94,12 @@ export default function WorkoutScreen() {
       setLastLoggedWeight(null);
       setIsEditingWeight(false);
       setExerciseImage(null);
+      setLibraryExercise(null);
+
+      // Look up exercise in local library cache
+      getCachedExercisesByNames([currentExercise.name])
+        .then(results => { if (results.length > 0) setLibraryExercise(results[0]); })
+        .catch(() => {});
 
       (async () => {
         try {
@@ -408,7 +417,14 @@ export default function WorkoutScreen() {
           <MaterialIcons name="close" size={24} color={colors.textPrimary} />
         </TouchableOpacity>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>{currentExercise.name}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.headerTitle}>{currentExercise.name}</Text>
+            {libraryExercise && (
+              <TouchableOpacity onPress={() => setShowExerciseDetail(true)} hitSlop={8}>
+                <MaterialIcons name="info-outline" size={18} color={colors.primaryDim} />
+              </TouchableOpacity>
+            )}
+          </View>
           <Text style={styles.headerSub}>SET {currentSet} OF {totalSets}{location?.name ? ` \u00B7 ${location.name}` : ''}</Text>
         </View>
         <TouchableOpacity style={styles.headerSide}>
@@ -832,6 +848,13 @@ export default function WorkoutScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Exercise Detail Modal */}
+      <ExerciseDetail
+        exercise={libraryExercise}
+        visible={showExerciseDetail}
+        onClose={() => setShowExerciseDetail(false)}
+      />
     </SafeAreaView>
   );
 }

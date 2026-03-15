@@ -57,6 +57,16 @@ export default function ProfileScreen() {
                 <MaterialIcons name="chevron-right" size={20} color={colors.textSecondary} />
               </View>
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/exercises')}>
+              <View style={styles.card}>
+                <MaterialIcons name="menu-book" size={20} color={colors.primary} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.cardLabel}>Exercise Library</Text>
+                  <Text style={styles.cardValue}>Browse exercises & form guides</Text>
+                </View>
+                <MaterialIcons name="chevron-right" size={20} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
             {profile.age && <InfoCard icon="cake" label="Age / Weight" value={`${profile.age}yo, ${profile.weight_kg}kg`} />}
             {profile.gender && <InfoCard icon="person" label="Gender" value={profile.gender} />}
           </View>

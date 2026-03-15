@@ -7,6 +7,7 @@ const { requestIdMiddleware, errorHandler } = require('./middleware/errorHandler
 const { createRateLimit } = require('./middleware/rateLimit');
 
 const agentRouter = require('./routes/agent');
+const exercisesRouter = require('./routes/exercises');
 const onboardingRouter = require('./routes/onboarding');
 const progressRouter = require('./routes/progress');
 const programmerRouter = require('./routes/programmer');
@@ -33,6 +34,7 @@ app.use('/api/jobs', jobRouter);
 
 // Protected API routes — require valid Firebase auth token
 app.use('/api/agent', authMiddleware, aiRateLimit, agentRouter);
+app.use('/api/exercises', authMiddleware, generalRateLimit, exercisesRouter);
 app.use('/api/onboarding', authMiddleware, aiRateLimit, onboardingRouter);
 app.use('/api/progress', authMiddleware, generalRateLimit, progressRouter);
 app.use('/api/programmer', authMiddleware, aiRateLimit, programmerRouter);

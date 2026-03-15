@@ -168,6 +168,73 @@ async function getAllUserUids(filter = {}) {
   return uids;
 }
 
+// --- Exercise Library ---
+
+async function getExercises({ category, equipment, difficulty, muscle, search, limit = 50, startAfter } = {}) {
+  let query = db.collection('exercises');
+
+  if (category) query = query.where('category', '==', category);
+  if (difficulty) query = query.where('difficulty', '==', difficulty);
+  if (equipment) query = query.where('equipment', 'array-contains', equipment);
+  if (muscle) query = query.where('primaryMuscles', 'array-contains', muscle);
+
+  query = query.limit(limit + 1);
+
+  if (startAfter) {
+    const cursorDoc = await db.doc(`exercises/${startAfter}`).get();
+    if (cursorDoc.exists) query = query.startAfter(cursorDoc);
+  }
+
+  const snap = await query.get();
+  let exercises = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+  // Client-side text search (acceptable for ~100 exercises)
+  if (search) {
+    const term = search.toLowerCase();
+    exercises = exercises.filter(e => e.name.toLowerCase().includes(term));
+  }
+
+  const hasMore = exercises.length > limit;
+  if (hasMore) exercises = exercises.slice(0, limit);
+
+  return { exercises, hasMore };
+}
+
+async function getExerciseById(exerciseId) {
+  const snap = await db.doc(`exercises/${exerciseId}`).get();
+  if (!snap.exists) return null;
+  return { id: snap.id, ...snap.data() };
+}
+
+async function getExercisesByNames(names) {
+  if (!names || names.length === 0) return [];
+
+  const results = [];
+  // Firestore 'in' queries limited to 30 per query
+  for (let i = 0; i < names.length; i += 30) {
+    const chunk = names.slice(i, i + 30);
+    const snap = await db.collection('exercises')
+      .where('name', 'in', chunk)
+      .get();
+    results.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  }
+  return results;
+}
+
+async function getExerciseAlternatives(exerciseId) {
+  const exercise = await getExerciseById(exerciseId);
+  if (!exercise || !exercise.alternatives || exercise.alternatives.length === 0) {
+    return [];
+  }
+
+  const results = [];
+  for (const slug of exercise.alternatives) {
+    const alt = await getExerciseById(slug);
+    if (alt) results.push(alt);
+  }
+  return results;
+}
+
 // --- Utilities ---
 
 function formatDate(date) {
@@ -190,4 +257,8 @@ module.exports = {
   saveInsight,
   updateUserProfile,
   getAllUserUids,
+  getExercises,
+  getExerciseById,
+  getExercisesByNames,
+  getExerciseAlternatives,
 };

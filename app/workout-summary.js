@@ -8,9 +8,10 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
 import { sendAgentMessage } from '../lib/api';
-import { getUserProfile } from '../lib/database';
+import { getUserProfile, getCachedExercisesByNames } from '../lib/database';
 import { buildUserContext } from '../lib/contextBuilder';
 import SwapExerciseWidget from '../components/SwapExerciseWidget';
+import ExerciseDetail from '../components/ExerciseDetail';
 
 export default function WorkoutSummaryScreen() {
   const router = useRouter();
@@ -24,9 +25,21 @@ export default function WorkoutSummaryScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [exerciseLibrary, setExerciseLibrary] = useState({});
+  const [detailExercise, setDetailExercise] = useState(null);
 
   useEffect(() => {
     getUserProfile().then(setUserProfile).catch(() => {});
+    // Batch lookup library data for all exercises
+    if (exercises.length > 0) {
+      getCachedExercisesByNames(exercises.map(e => e.name))
+        .then(results => {
+          const map = {};
+          results.forEach(r => { map[r.name.toLowerCase()] = r; });
+          setExerciseLibrary(map);
+        })
+        .catch(() => {});
+    }
   }, []);
 
   const totalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
@@ -159,6 +172,7 @@ export default function WorkoutSummaryScreen() {
       >
         {exercises.map((exercise, i) => {
           const isSelected = i === selectedIdx;
+          const libData = exerciseLibrary[exercise.name.toLowerCase()];
           return (
             <TouchableOpacity
               key={`${exercise.name}-${i}`}
@@ -174,12 +188,26 @@ export default function WorkoutSummaryScreen() {
                 />
               </View>
               <View style={styles.exerciseInfo}>
-                <Text style={[styles.exerciseName, isSelected && styles.exerciseNameSelected]}>
-                  {exercise.name}
-                </Text>
-                <Text style={[styles.exerciseMeta, isSelected && styles.exerciseMetaSelected]}>
-                  {exercise.sets} sets x {exercise.reps} reps
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.exerciseName, isSelected && styles.exerciseNameSelected]} numberOfLines={1}>
+                    {exercise.name}
+                  </Text>
+                  {libData && (
+                    <TouchableOpacity onPress={() => setDetailExercise(libData)} hitSlop={8}>
+                      <MaterialIcons name="info-outline" size={16} color={isSelected ? 'rgba(18,20,8,0.5)' : 'rgba(212,255,0,0.3)'} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.exerciseMeta, isSelected && styles.exerciseMetaSelected]}>
+                    {exercise.sets} sets x {exercise.reps} reps
+                  </Text>
+                  {libData && (
+                    <View style={{ backgroundColor: isSelected ? 'rgba(18,20,8,0.15)' : 'rgba(212,255,0,0.08)', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }}>
+                      <Text style={{ fontSize: 10, fontFamily: 'Inter_600SemiBold', color: isSelected ? 'rgba(18,20,8,0.6)' : 'rgba(212,255,0,0.4)' }}>{libData.category}</Text>
+                    </View>
+                  )}
+                </View>
               </View>
               {isSelected ? (
                 <TouchableOpacity
@@ -265,6 +293,13 @@ export default function WorkoutSummaryScreen() {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Exercise Detail Modal */}
+      <ExerciseDetail
+        exercise={detailExercise}
+        visible={!!detailExercise}
+        onClose={() => setDetailExercise(null)}
+      />
     </SafeAreaView>
   );
 }
