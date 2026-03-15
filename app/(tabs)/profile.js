@@ -5,9 +5,12 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius } from '../../lib/theme';
 import { useRouter } from 'expo-router';
 import { getUserProfile, getLocations, resetDatabase } from '../../lib/database';
+import { useAuth } from '../../lib/authContext';
+import { signOut } from '../../lib/auth';
 
 export default function ProfileScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [profile, setProfile] = useState(null);
   const [locationCount, setLocationCount] = useState(0);
 
@@ -36,7 +39,8 @@ export default function ProfileScreen() {
           <View style={styles.avatar}>
             <MaterialIcons name="person" size={40} color={colors.bgDark} />
           </View>
-          <Text style={styles.name}>Athlete</Text>
+          <Text style={styles.name}>{user?.displayName || 'Athlete'}</Text>
+          {user?.email && <Text style={styles.email}>{user.email}</Text>}
         </View>
 
         {profile && (
@@ -57,6 +61,25 @@ export default function ProfileScreen() {
             {profile.gender && <InfoCard icon="person" label="Gender" value={profile.gender} />}
           </View>
         )}
+
+        <TouchableOpacity
+          style={styles.signOutButton}
+          onPress={() => {
+            Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Sign Out',
+                onPress: async () => {
+                  await signOut();
+                  router.replace('/auth');
+                },
+              },
+            ]);
+          }}
+        >
+          <MaterialIcons name="logout" size={18} color={colors.textSecondary} />
+          <Text style={styles.signOutText}>Sign Out</Text>
+        </TouchableOpacity>
 
         {__DEV__ && (
           <TouchableOpacity
@@ -104,6 +127,7 @@ const styles = StyleSheet.create({
   avatarSection: { alignItems: 'center', gap: spacing.sm },
   avatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
   name: { fontSize: 20, fontFamily: 'Inter_700Bold', color: colors.textPrimary },
+  email: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary },
   infoCards: { gap: spacing.sm },
   card: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.md,
@@ -112,6 +136,12 @@ const styles = StyleSheet.create({
   },
   cardLabel: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 1 },
   cardValue: { fontSize: 15, fontFamily: 'Inter_500Medium', color: colors.textPrimary, textTransform: 'capitalize', marginTop: 2 },
+  signOutButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
+    padding: spacing.md, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.borderLight, backgroundColor: colors.bgCard,
+  },
+  signOutText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: colors.textSecondary },
   resetButton: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.sm,
     padding: spacing.md, borderRadius: radius.md,

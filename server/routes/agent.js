@@ -3,6 +3,8 @@ const { GoogleGenAI } = require('@google/genai');
 const { routeRequest } = require('../agents/router');
 const { generateExerciseDemo, generateFormCheck, generateWorkoutCard } = require('../agents/visual');
 const { AGENTS } = require('../agents/types');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { getWorkoutStreak, getUserProfile } = require('../services/firestore');
 const router = express.Router();
 
 // Health check for all agents
@@ -13,29 +15,44 @@ router.get('/health', (req, res) => {
     agents: {
       [AGENTS.orchestrator]: hasApiKey ? 'ok' : 'no_api_key',
       [AGENTS.planning]: hasApiKey ? 'ok' : 'no_api_key',
-      [AGENTS.memory]: 'ok',  // deterministic, no external deps
+      [AGENTS.memory]: 'ok',
       [AGENTS.visual]: hasApiKey ? 'ok' : 'no_api_key',
-      [AGENTS.motivation]: 'ok',  // deterministic, no external deps
+      [AGENTS.motivation]: 'ok',
     },
     timestamp: new Date().toISOString(),
   });
 });
 
-router.post('/greet', async (req, res) => {
-  try {
-    const { userContext } = req.body;
-    const { buildGreetingContext } = require('../agents/memory');
+router.post('/greet', asyncHandler(async (req, res) => {
+  const { userContext } = req.body;
+  const { buildGreetingContext } = require('../agents/memory');
+  const uid = req.user?.uid;
 
-    const greetingContext = buildGreetingContext(userContext);
-
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
+  // Enrich greeting context with Firestore streak data
+  let enrichedContext = { ...userContext };
+  if (uid) {
+    try {
+      const streak = await getWorkoutStreak(uid);
+      if (streak.current > 0 || streak.lastWorkoutDate) {
+        enrichedContext.streak = streak;
+        enrichedContext.lastWorkoutDate = streak.lastWorkoutDate;
+      }
+    } catch (err) {
+      // Non-blocking — fall back to client-provided context
+      console.warn('[Agent/greet] Firestore streak lookup failed:', err.message);
     }
+  }
 
-    const ai = new GoogleGenAI({ apiKey });
+  const greetingContext = buildGreetingContext(enrichedContext);
 
-    const systemPrompt = `You are Aura, a warm and motivating personal training coach. Generate a brief greeting (2-3 sentences) for the user before their workout.
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
+  }
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const systemPrompt = `You are Aura, a warm and motivating personal training coach. Generate a brief greeting (2-3 sentences) for the user before their workout.
 
 ${greetingContext}
 
@@ -47,44 +64,49 @@ Guidelines:
 - Ask if they're ready or want to adjust
 - Be warm, motivating, and concise`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite-preview',
-      contents: 'Generate a greeting for the user before their workout.',
-      config: {
-        systemInstruction: systemPrompt,
-      },
-    });
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-flash-lite-preview',
+    contents: 'Generate a greeting for the user before their workout.',
+    config: {
+      systemInstruction: systemPrompt,
+    },
+  });
 
-    const text = response.text;
+  const text = response.text;
+  res.json({ text });
+}));
 
-    res.json({ text });
-  } catch (error) {
-    console.error('Greeting error:', error);
-    res.status(500).json({ error: 'Failed to generate greeting' });
+router.post('/', asyncHandler(async (req, res) => {
+  const { message, history, userContext } = req.body;
+
+  if (!message) {
+    return res.status(400).json({ error: 'message is required' });
   }
-});
 
-router.post('/', async (req, res) => {
-  try {
-    const { message, history, userContext } = req.body;
-
-    if (!message) {
-      return res.status(400).json({ error: 'message is required' });
+  // Supplement sparse userContext with Firestore profile data
+  let enrichedContext = userContext;
+  const uid = req.user?.uid;
+  if (uid && (!userContext?.goal || !userContext?.equipment)) {
+    try {
+      const profile = await getUserProfile(uid);
+      if (profile) {
+        enrichedContext = {
+          goal: profile.goal,
+          equipment: profile.equipment,
+          experience: profile.experience,
+          ...userContext, // Client-provided values take precedence
+        };
+      }
+    } catch (err) {
+      console.warn('[Agent] Firestore profile lookup failed:', err.message);
     }
-
-    const result = await routeRequest({ message, history, userContext });
-    res.json(result);
-  } catch (error) {
-    console.error('Agent API Error:', error);
-    const isTimeout = error.message?.includes('timed out');
-    res.status(isTimeout ? 504 : 500).json({
-      error: isTimeout ? 'Request timed out. Please try again.' : error.message,
-      retryable: isTimeout,
-    });
   }
-});
 
-router.post('/image', async (req, res) => {
+  const result = await routeRequest({ message, history, userContext: enrichedContext });
+  res.json(result);
+}));
+
+router.post('/image', asyncHandler(async (req, res) => {
   const timeout = setTimeout(() => {
     if (!res.headersSent) {
       res.status(504).json({ error: 'Image generation timed out' });
@@ -116,11 +138,8 @@ router.post('/image', async (req, res) => {
     }
   } catch (error) {
     clearTimeout(timeout);
-    console.error('Visual Agent Error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: error.message });
-    }
+    throw error;
   }
-});
+}));
 
 module.exports = router;

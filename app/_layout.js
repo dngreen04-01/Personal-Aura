@@ -12,6 +12,7 @@ import {
 } from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
 import { colors } from '../lib/theme';
+import { AuthProvider } from '../lib/authContext';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -39,15 +40,17 @@ export default function RootLayout() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.bgDark }} onLayout={onLayoutRootView}>
-      <StatusBar style="light" backgroundColor={colors.bgDark} />
-      <Stack
-        screenOptions={{
-          headerShown: false,
-          contentStyle: { backgroundColor: colors.bgDark },
-          animation: 'slide_from_right',
-        }}
-      />
-    </View>
+    <AuthProvider>
+      <View style={{ flex: 1, backgroundColor: colors.bgDark }} onLayout={onLayoutRootView}>
+        <StatusBar style="light" backgroundColor={colors.bgDark} />
+        <Stack
+          screenOptions={{
+            headerShown: false,
+            contentStyle: { backgroundColor: colors.bgDark },
+            animation: 'slide_from_right',
+          }}
+        />
+      </View>
+    </AuthProvider>
   );
 }

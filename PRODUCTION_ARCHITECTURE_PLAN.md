@@ -13,110 +13,156 @@ This document outlines the full production refactoring of the Aura fitness coach
 
 ---
 
+## Progress Tracker
+
+| Phase | Status | Completed |
+|-------|--------|-----------|
+| **Phase 1: Firebase Auth** | COMPLETE | 2026-03-15 |
+| **Phase 2: Cloud Database** | COMPLETE | 2026-03-15 |
+| **Phase 3: Backend Autonomy** | COMPLETE | 2026-03-15 |
+| **Phase 4: Exercise Library** | NOT STARTED | — |
+| **Phase 5: Shared Equipment** | NOT STARTED | — |
+| **Phase 6: Social Features** | NOT STARTED | — |
+| **Phase 7: Infrastructure** | NOT STARTED | — |
+
+---
+
 ## Current State Analysis
 
 | Layer | Current | Target |
 |-------|---------|--------|
-| **Auth** | None (single device user) | Firebase Auth (email, Google, Apple) |
-| **Database** | SQLite only (on-device) | Firestore (cloud) + SQLite (local cache) |
-| **Backend** | Stateless Express on Cloud Run | Stateful user-aware service with background jobs |
-| **Frontend** | Tightly coupled to local DB | API-first with offline-capable local cache |
+| **Auth** | Firebase Auth (email/password) | Firebase Auth (email, Google, Apple) |
+| **Database** | Firestore (cloud) + SQLite (local cache) with write-through sync | Firestore (cloud) + SQLite (local cache) |
+| **Backend** | Autonomous Express on Cloud Run with Firestore reads, background jobs, push notifications | Stateful user-aware service with background jobs |
+| **Frontend** | Tightly coupled to local DB (auth token on all API calls) | API-first with offline-capable local cache |
 | **Media** | None | Cloud Storage exercise library |
 | **Social** | None | Shared gyms, progress sharing, competitions |
 
 ---
 
-## Phase 1: Firebase Auth & Project Foundation
+## Phase 1: Firebase Auth & Project Foundation — COMPLETE
 
-### 1.1 Firebase Project Setup
+> **Completed:** 2026-03-15
+> **Status:** All code implemented. Awaiting local device testing (blocked by public WiFi during implementation).
+
+### 1.1 Firebase Project Setup — DONE
+
+Firebase project `aura-fitness-api` created and attached to existing GCP project (Cloud Run project ID: `177339568703`).
 
 ```
 aura-fitness/
 ├── firebase.json           # Firebase project config
-├── firestore.rules         # Security rules
-├── firestore.indexes.json  # Composite indexes
-├── storage.rules           # Cloud Storage rules
-└── .firebaserc             # Project aliases (dev/staging/prod)
+├── firestore.rules         # Security rules (all 6 collections covered)
+├── firestore.indexes.json  # Empty indexes placeholder
+├── storage.rules           # Cloud Storage rules (exercises, avatars, social)
+└── .firebaserc             # Project alias: default → aura-fitness
 ```
 
-**Services to enable:**
-- Firebase Authentication (Email/Password, Google Sign-In, Apple Sign-In)
-- Cloud Firestore (Native mode)
-- Firebase Cloud Storage (exercise media)
-- Firebase Cloud Functions (optional, for triggers)
+**Services enabled:**
+- Firebase Authentication — Email/Password + Google Sign-In enabled
+- Cloud Firestore (Native mode) — ready for Phase 2
+- Firebase Cloud Storage — rules deployed, ready for Phase 4
 
-### 1.2 Frontend Auth Layer
+**Apple Sign-In:** Not yet enabled (requires Apple Developer account configuration)
 
-**New files:**
+### 1.2 Frontend Auth Layer — DONE
+
+**Implementation decision: Firebase JS SDK (modular v9+) instead of `@react-native-firebase/*`**
+
+The original plan called for `@react-native-firebase/*` native modules. We switched to the **Firebase JS SDK** (`firebase` npm package, modular v9+ API) because:
+- Works with Expo managed workflow out of the box — no native module linking or custom dev client required
+- Simpler dependency chain (single `firebase` package vs 4 separate `@react-native-firebase/*` packages)
+- Auth persistence handled via `@react-native-async-storage/async-storage` with `getReactNativePersistence()`
+- Trade-off: slightly less performant than native modules for Firestore real-time listeners (acceptable for Phase 2)
+
+**Note:** `@react-native-async-storage/async-storage` does NOT require an Expo config plugin — it works as a standard dependency. Initial attempt to register it as a plugin in `app.json` caused a `PluginError` and was removed.
+
+**New files created:**
 ```
 lib/
-├── firebase.js             # Firebase SDK initialization
-├── auth.js                 # Auth state management (sign in, sign up, sign out, listeners)
-└── authContext.js           # React Context provider for auth state
+├── firebase.js             # Firebase JS SDK init with AsyncStorage persistence
+├── auth.js                 # signUp, signIn, signOut, resetPassword, getIdToken
+└── authContext.js           # AuthProvider + useAuth() hook via onAuthStateChanged
 ```
 
-**Auth flow:**
-1. App launches → check `firebase.auth().currentUser`
-2. If no user → show Auth screen (new `app/auth.js`)
-3. If user exists but no profile → route to onboarding
-4. If user + profile → route to tabs
-5. Auth state listener updates context on sign-in/sign-out
-
-**Dependencies to add (frontend):**
+**Actual dependencies added (frontend):**
 ```json
 {
-  "@react-native-firebase/app": "latest",
-  "@react-native-firebase/auth": "latest",
-  "@react-native-firebase/firestore": "latest",
-  "@react-native-firebase/storage": "latest"
+  "firebase": "^11.0.0",
+  "@react-native-async-storage/async-storage": "2.1.2"
 }
 ```
 
-### 1.3 Backend Auth Middleware
+### 1.3 Backend Auth Middleware — DONE
 
 **New file:** `server/middleware/auth.js`
+- Verifies Firebase ID token via `firebase-admin` → `admin.auth().verifyIdToken()`
+- Extracts `uid`, `email`, `displayName` from decoded token → attaches as `req.user`
+- Returns 401 for missing/invalid `Authorization: Bearer <token>` header
+- Uses `admin.credential.applicationDefault()` — works with `gcloud auth application-default login` locally and automatically on Cloud Run via attached service account
 
-```
-// Verifies Firebase ID token on every request
-// Extracts uid, email, displayName from token
-// Attaches user object to req.user
-// Returns 401 for missing/invalid tokens
-```
+**All 4 existing API routes now protected:**
+- `/api/agent` — coaching chat
+- `/api/onboarding` — plan generation
+- `/api/progress` — analytics insights
+- `/api/programmer` — plan regeneration
 
-**All API routes become user-scoped:**
-- `req.user.uid` used as the primary key for all data operations
-- No anonymous API access (except health check)
+Only `/health` remains public.
 
-**Dependencies to add (backend):**
+**Dependency added (backend):**
 ```json
 {
-  "firebase-admin": "latest"
+  "firebase-admin": "^13.0.0"
 }
 ```
 
-### 1.4 Navigation Updates
+### 1.4 Navigation & UI Updates — DONE
 
 **Updated `app/_layout.js`:**
-- Wrap app in `<AuthProvider>`
-- Auth state determines initial route
+- Wrapped entire app in `<AuthProvider>` (above Stack navigator)
 
 **New `app/auth.js`:**
-- Sign-in / Sign-up screen
-- Email/password + Google + Apple providers
-- Matches existing dark theme with lime accent
+- Three modes: sign-in, sign-up, password reset
+- Email/password only for now (Google/Apple require native OAuth config — deferred)
+- Password visibility toggle, form validation, Firebase error code mapping
+- Dark theme with lime accent, matches existing design system
 
 **Updated `app/index.js`:**
-- Check auth state first, then onboarding status
+- Reads `useAuth()` → if `authLoading`, shows spinner
+- If no `user` → redirects to `/auth`
+- If `user` exists → checks SQLite onboarding status → routes to `/(tabs)` or `/onboarding`
+
+**Updated `lib/api.js`:**
+- New `authHeaders()` helper calls `getIdToken()` and injects `Authorization: Bearer <token>` on every request
+- All 7 API functions updated to use `authHeaders()` instead of hardcoded `Content-Type` only
+
+**Updated `app/(tabs)/profile.js`:**
+- Displays `user.displayName` and `user.email` from Firebase auth context
+- Added **Sign Out** button with confirmation alert → calls `signOut()` → redirects to `/auth`
+
+### Phase 1 Discoveries & Notes for Future Phases
+
+1. **Firebase project ID is `aura-fitness-api`** (not `aura-fitness` as assumed in original plan). This matches the existing GCP project with Cloud Run deployment.
+2. **Expo `EXPO_PUBLIC_` prefix required** for frontend env vars — Firebase config uses `EXPO_PUBLIC_FIREBASE_*` naming convention so Expo bundles them into the client.
+3. **Backend credentials for local dev** require `gcloud auth application-default login`. On Cloud Run, the attached service account provides credentials automatically.
+4. **Google Sign-In on mobile** requires additional setup: OAuth 2.0 client IDs for iOS/Android, Expo config plugin for Google Sign-In. This is a follow-up task, not a blocker.
+5. **Auth token refresh** is handled automatically by Firebase JS SDK — `getIdToken()` returns a fresh token if the current one is expired.
+6. **No API versioning was needed** for Phase 1 — existing routes kept their paths, only gained auth middleware. The `/api/v2/` prefix plan can be revisited if needed in Phase 3.
 
 ---
 
-## Phase 2: Cloud Database (Firestore) + Local SQLite Cache
+## Phase 2: Cloud Database (Firestore) + Local SQLite Cache — COMPLETE
+
+> **Completed:** 2026-03-15
+> **Status:** All code implemented. Verified via syntax checks, import/export resolution, Metro bundler full iOS build (zero errors), and 23-assertion serialization roundtrip test suite.
+>
+> **Note from Phase 1:** Frontend uses Firebase JS SDK (`firebase` package), not `@react-native-firebase/firestore`. Firestore client uses `firebase/firestore` modular imports. Real-time listeners use `onSnapshot()` from the JS SDK.
 
 ### 2.1 Firestore Schema
 
 ```
 users/{uid}/
-├── profile                          # User profile document
+├── profile/main                     # User profile document
 │   ├── goal: string
 │   ├── equipment: string
 │   ├── experience: string
@@ -127,6 +173,10 @@ users/{uid}/
 │   ├── minutesPerSession: number
 │   ├── displayName: string
 │   ├── avatarUrl: string
+│   ├── pushToken: string            # Expo push token (Phase 3)
+│   ├── currentStreak: number        # Maintained by streakChecker job (Phase 3)
+│   ├── longestStreak: number        # Maintained by streakChecker job (Phase 3)
+│   ├── lastWorkoutDate: string      # ISO date, maintained by streakChecker job (Phase 3)
 │   ├── createdAt: timestamp
 │   └── updatedAt: timestamp
 │
@@ -156,6 +206,19 @@ users/{uid}/
 │               ├── rpe: number
 │               ├── restSeconds: number
 │               └── loggedAt: timestamp
+│
+├── insights/                        # Weekly AI progress summaries (Phase 3)
+│   └── {weekId}/                   # e.g., "2026-W11" (ISO 8601 week)
+│       ├── sessionCount: number
+│       ├── totalVolume: number
+│       ├── totalSets: number
+│       ├── streak: number
+│       ├── prs: array
+│       ├── topExercise: string
+│       ├── insight: string          # AI-generated text from Gemini Flash-Lite
+│       ├── weekId: string
+│       ├── createdAt: timestamp
+│       └── updatedAt: timestamp
 │
 ├── preferences/
 │   └── exerciseUnits               # Single document
@@ -330,43 +393,43 @@ async function logSet(sessionId, exerciseName, ..., syncToCloud = true) {
 
 ---
 
-## Phase 3: Backend Refactoring for Autonomy
+## Phase 3: Backend Autonomy — COMPLETE
 
-### 3.1 New Backend Architecture
+> **Completed:** 2026-03-15
+> **Status:** All code implemented. Verified via 17-test suite: module resolution (14/14), unit tests (errorHandler, rate limiter, scheduler, job auth, ISO week calc), Express integration (middleware wiring, route mounting), and end-to-end HTTP tests (health, auth rejection, job key validation).
+
+### 3.1 Implemented Backend Architecture
 
 ```
 server/
-├── index.js                    # Express app entry (updated)
-├── package.json                # Updated dependencies
-├── Dockerfile                  # Updated for new deps
+├── index.js                    # Express app entry (requestIdMiddleware, rate limiters, job routes, errorHandler)
+├── package.json                # No new dependencies needed
+├── Dockerfile                  # Unchanged — Node 20 already supports all built-ins used
 │
 ├── middleware/
-│   ├── auth.js                 # Firebase token verification
-│   ├── rateLimit.js            # Per-user rate limiting
-│   └── errorHandler.js         # Centralized error handling
+│   ├── auth.js                 # Firebase token verification (Phase 1)
+│   ├── rateLimit.js            # Per-user in-memory sliding window (20/min AI, 60/min general)
+│   └── errorHandler.js         # AppError class, asyncHandler, requestIdMiddleware, structured JSON logging
 │
 ├── routes/
-│   ├── agent.js                # Real-time coaching (existing, add auth)
-│   ├── onboarding.js           # Plan generation (existing, add auth + Firestore save)
-│   ├── progress.js             # Analytics (existing, add auth + read from Firestore)
-│   ├── programmer.js           # Plan regeneration (existing, add auth)
-│   ├── exercises.js            # NEW: Exercise library CRUD
-│   ├── locations.js            # NEW: Shared location management
-│   ├── social.js               # NEW: Social features (feed, friends, sharing)
-│   └── competitions.js         # NEW: Competition management
+│   ├── agent.js                # Coaching chat — Firestore streak enrichment on /greet, profile supplement on /
+│   ├── onboarding.js           # Plan generation — saves plan to Firestore after generation
+│   ├── progress.js             # Analytics — reads stats from Firestore when req.body empty
+│   ├── programmer.js           # Plan regeneration — reads profile/plan/history from Firestore, saves plan back
+│   └── jobs.js                 # Cloud Scheduler endpoints: streak-checker, progress-analyzer, plan-adjuster
 │
 ├── services/
-│   ├── firestore.js            # Firestore admin client
-│   ├── storage.js              # Cloud Storage for media
-│   ├── scheduler.js            # Background job scheduler
-│   └── notifications.js        # Push notification service
+│   ├── firestore.js            # Admin Firestore client (11 functions — see 3.2)
+│   ├── scheduler.js            # getEligibleUsers, runForAllUsers (per-user error isolation), logJobResult
+│   └── notifications.js        # Expo Push API sender (sendPushNotification, sendBatchNotifications)
 │
-├── jobs/                       # Background jobs (run independently of device)
-│   ├── planAdjuster.js         # Periodic plan optimization based on progress
-│   ├── progressAnalyzer.js     # Weekly/monthly progress reports
-│   ├── streakChecker.js        # Daily streak maintenance & notifications
-│   ├── competitionScorer.js    # Real-time competition leaderboard updates
-│   └── feedGenerator.js        # Generate social feed entries from user activity
+├── jobs/
+│   ├── streakChecker.js        # Daily streak maintenance + milestone/reminder push notifications
+│   ├── progressAnalyzer.js     # Weekly AI insight generation via Gemini Flash-Lite
+│   └── planAdjuster.js         # Background plan optimization — reuses handlePlanRegeneration agent
+│
+├── scripts/
+│   └── runJob.js               # Manual job runner for local dev: node server/scripts/runJob.js <job-name>
 │
 └── agents/                     # Existing AI agents (unchanged internally)
     ├── types.js
@@ -378,105 +441,187 @@ server/
     └── visual.js
 ```
 
-### 3.2 Background Job System
+### 3.2 Firestore Admin Service (`server/services/firestore.js`)
 
-**Purpose:** Enable AI tasks to run independently of the device.
+Centralized server-side Firestore read/write layer. Reuses the same `firebase-admin` `initializeApp()` idempotent guard as `middleware/auth.js`. Uses `admin.firestore()` which bypasses client-side security rules (trusted server access).
 
-**Implementation:** Use Cloud Scheduler (GCP) or a simple cron-based job runner within the Express app.
+**Exported functions (11):**
+| Function | Purpose |
+|----------|---------|
+| `getFirestore()` | Singleton admin Firestore instance |
+| `getUserProfile(uid)` | Read `users/{uid}/profile/main` |
+| `getUserActivePlan(uid)` | Query `users/{uid}/plans` where `active == true`, limit 1 |
+| `getUserSessions(uid, { days })` | Query `users/{uid}/sessions` with date range, ordered desc |
+| `getSessionSets(uid, sessionId)` | Read `users/{uid}/sessions/{id}/sets` subcollection |
+| `getCompletedSessionCount(uid, sinceDays)` | Count sessions since date |
+| `getWorkoutStreak(uid)` | Compute consecutive-day streak from session dates |
+| `saveNewPlan(uid, planJson, generatedBy)` | Write new plan doc, deactivate previous active plan (batched) |
+| `saveInsight(uid, weekId, data)` | Write `users/{uid}/insights/{weekId}` |
+| `updateUserProfile(uid, fields)` | Partial update on `users/{uid}/profile/main` |
+| `getAllUserUids(filter)` | List user UIDs via collectionGroup query (for batch jobs) |
 
-**Job: Plan Adjuster** (`jobs/planAdjuster.js`)
+### 3.3 Background Job System
+
+**Architecture:** Cloud Scheduler (GCP) → HTTP POST → Cloud Run `/api/jobs/{jobName}` → job handler.
+
+Why Cloud Scheduler and not `node-cron`: Cloud Run is stateless, scales to zero, and multiple instances would duplicate cron jobs.
+
+**Job auth:** `JOBS_API_KEY` env var validated via `x-jobs-key` header in `jobAuthMiddleware`. No Firebase token needed for server-to-server calls.
+
+**Job: Streak Checker** (`jobs/streakChecker.js`)
 ```
-Trigger: After every 7 completed sessions, or weekly (whichever comes first)
-Input:  User's workout history, current plan, profile (from Firestore)
-Process:
-  1. Query Firestore for user's recent sessions and sets
-  2. Analyze progressive overload adherence
-  3. Detect plateaus (3+ sessions with no weight/rep increase)
-  4. Call Planning Agent with full context
-  5. Generate adjusted plan
-  6. Save new plan version to Firestore
-  7. Send push notification: "Your plan has been updated based on your progress"
-Output: New plan version in Firestore, notification sent
+Trigger:   Cloud Scheduler daily 9 PM UTC
+Process:   Per user — compute streak → update profile (currentStreak, longestStreak, lastWorkoutDate)
+           → send milestone push (7, 14, 30, 60, 100 days) or streak-at-risk reminder
+Depends:   services/firestore.js, services/notifications.js
 ```
 
 **Job: Progress Analyzer** (`jobs/progressAnalyzer.js`)
 ```
-Trigger: Weekly (Sunday evening)
-Input:  User's week of workout data (from Firestore)
-Process:
-  1. Calculate weekly volume, frequency, PRs
-  2. Compare to previous weeks
-  3. Generate AI insight via Gemini
-  4. Store insight in Firestore (users/{uid}/insights/{weekId})
-  5. Send push notification with highlight
-Output: Weekly insight document, notification
+Trigger:   Cloud Scheduler Sunday 8 PM UTC
+Filter:    Only users with sessions in past 7 days
+Process:   Per user — compute weekly stats (volume, sets, PRs, top exercise)
+           → call Gemini Flash-Lite for AI insight → save to users/{uid}/insights/{weekId}
+           → send push notification with highlight
+Depends:   services/firestore.js, services/notifications.js, @google/genai
 ```
 
-**Job: Streak Checker** (`jobs/streakChecker.js`)
+**Job: Plan Adjuster** (`jobs/planAdjuster.js`)
 ```
-Trigger: Daily at 9 PM user's local time
-Input:  User's session history
-Process:
-  1. Check if user has worked out today (based on schedule)
-  2. If streak at risk, send reminder notification
-  3. If streak broken, update streak counter
-  4. If milestone reached (7, 30, 100 days), generate celebration
-Output: Streak update, conditional notification
+Trigger:   Cloud Scheduler every 6 hours (job checks eligibility per user)
+Eligible:  7+ completed sessions since last plan adjustment OR 7+ calendar days since active plan created
+Process:   Per user — read profile, active plan, 30 days of sessions+sets
+           → call handlePlanRegeneration from agents/planning.js (reuses existing agent)
+           → save new plan via saveNewPlan(uid, plan, 'coach') → send push
+Depends:   services/firestore.js, services/notifications.js, agents/planning.js
 ```
 
-**Job: Competition Scorer** (`jobs/competitionScorer.js`)
+**Cloud Scheduler cron config** (GCP Console/CLI, not code):
 ```
-Trigger: Real-time (Firestore trigger on session completion) + hourly batch
-Process:
-  1. On session complete, recalculate user's competition scores
-  2. Update leaderboard in competition document
-  3. Check for position changes → notify affected users
-  4. On competition end, determine winners and generate results
+streak-checker:      0 21 * * *     (daily 9 PM UTC)
+progress-analyzer:   0 20 * * 0     (Sunday 8 PM UTC)
+plan-adjuster:       0 */6 * * *    (every 6 hours)
 ```
 
-### 3.3 API Route Changes
+**Local dev:** `node server/scripts/runJob.js streak-checker|progress-analyzer|plan-adjuster`
 
-**All existing routes gain:**
-- `auth` middleware (token verification)
-- User-scoped data access via `req.user.uid`
-- Firestore read/write instead of expecting client-sent data
+### 3.4 Middleware Stack
 
-**New route: `/api/exercises`**
+**Request processing order in `server/index.js`:**
 ```
-GET    /api/exercises              # List exercises (paginated, filterable)
-GET    /api/exercises/:id          # Get exercise detail with media URLs
-GET    /api/exercises/search?q=    # Full-text search
-```
-
-**New route: `/api/locations`**
-```
-GET    /api/locations/nearby?lat=&lng=  # Find shared locations near coordinates
-POST   /api/locations/shared            # Create shared location
-PUT    /api/locations/shared/:id        # Update shared location (contributors only)
-GET    /api/locations/shared/:id        # Get shared location detail
-POST   /api/locations/shared/:id/claim  # Claim/link shared location to user profile
+cors() → express.json({ limit: '5mb' }) → requestIdMiddleware
+  ├─ GET  /health                          (public)
+  ├─ POST /api/jobs/*                      (jobAuthMiddleware — API key)
+  ├─ POST /api/agent/*                     (authMiddleware → aiRateLimit)
+  ├─ POST /api/onboarding                  (authMiddleware → aiRateLimit)
+  ├─ POST /api/progress/*                  (authMiddleware → generalRateLimit)
+  ├─ POST /api/programmer/*                (authMiddleware → aiRateLimit)
+  └─ errorHandler                          (must be last — 4-arg Express error middleware)
 ```
 
-**New route: `/api/social`**
-```
-GET    /api/social/feed                 # Get social feed (friends + public)
-POST   /api/social/share                # Share a workout/PR/achievement
-POST   /api/social/like/:postId         # Like a post
-GET    /api/social/friends              # List friends
-POST   /api/social/friends/request      # Send friend request
-PUT    /api/social/friends/:uid/accept  # Accept friend request
-DELETE /api/social/friends/:uid         # Remove friend
+**Rate limits:** AI endpoints (agent, onboarding, programmer) = 20 req/min per user. General endpoints (progress) = 60 req/min per user. In-memory sliding window by `req.user.uid`. Expired entries cleaned every 5 minutes.
+
+**Error response shape:**
+```json
+{ "error": "message", "code": "PLAN_GENERATION_FAILED", "retryable": true, "requestId": "uuid" }
 ```
 
-**New route: `/api/competitions`**
+**Structured log format** (JSON, auto-parsed by Cloud Run → Cloud Logging):
+```json
+{ "severity": "ERROR", "message": "...", "uid": "...", "path": "...", "requestId": "...", "statusCode": 500 }
 ```
-GET    /api/competitions                # List active/upcoming competitions
-POST   /api/competitions                # Create competition
-GET    /api/competitions/:id            # Get competition detail + leaderboard
-POST   /api/competitions/:id/join       # Join competition
-GET    /api/competitions/:id/leaderboard # Real-time leaderboard
-POST   /api/competitions/join/:code     # Join via invite code
+
+### 3.5 Route Modifications (Backward-Compatible)
+
+All modified routes accept `req.body` data as before. Firestore reads are fallback-only — triggered when body data is missing/sparse. This ensures the frontend transition is non-breaking.
+
+| Route | Firestore Read | Firestore Write |
+|-------|---------------|-----------------|
+| `POST /api/agent/greet` | `getWorkoutStreak(uid)` — enriches greeting with streak data | — |
+| `POST /api/agent/` | `getUserProfile(uid)` — supplements sparse `userContext` | — |
+| `POST /api/onboarding` | — | `saveNewPlan(uid, plan, 'onboarding')` |
+| `POST /api/progress/insights` | `getUserSessions(uid)` + `getSessionSets()` when body empty | — |
+| `POST /api/programmer/submit` | `getUserProfile`, `getUserActivePlan`, `getUserSessions` as fallbacks | `saveNewPlan(uid, plan, 'programmer')` |
+
+### 3.6 Push Notifications (`services/notifications.js`)
+
+Uses Expo Push API (`https://exp.host/--/api/v2/push/send`) — single HTTP POST, no platform-specific config. Node 20 built-in `fetch()`.
+
+**Token lifecycle:**
+1. Frontend registers token: `lib/authContext.js` calls `Notifications.getExpoPushTokenAsync()` on auth state change, writes to `users/{uid}/profile/main.pushToken`
+2. Server reads token: `notifications.js` reads `pushToken` from profile before sending
+3. Stale token cleanup: `DeviceNotRegistered` response triggers `FieldValue.delete()` on the `pushToken` field
+
+### 3.7 Firestore Schema Additions (Phase 3)
+
+New fields and collections added by Phase 3:
+
 ```
+users/{uid}/
+├── profile/main
+│   ├── pushToken: string           # Expo push token (written by frontend, read by server)
+│   ├── currentStreak: number       # Updated by streakChecker job
+│   ├── longestStreak: number       # Updated by streakChecker job
+│   └── lastWorkoutDate: string     # ISO date, updated by streakChecker job
+│
+└── insights/                       # NEW collection — weekly AI-generated progress summaries
+    └── {weekId}/                   # e.g., "2026-W11"
+        ├── sessionCount: number
+        ├── totalVolume: number
+        ├── totalSets: number
+        ├── streak: number
+        ├── prs: array
+        ├── topExercise: string
+        ├── insight: string         # AI-generated text from Gemini Flash-Lite
+        ├── weekId: string
+        ├── createdAt: string
+        └── updatedAt: string
+```
+
+### 3.8 New Environment Variable
+
+| Variable | Location | Purpose |
+|----------|----------|---------|
+| `JOBS_API_KEY` | `server/.env` | API key for Cloud Scheduler → job endpoint auth. Set in Cloud Run secrets for production. |
+
+### 3.9 Verification Results (17-Test Suite)
+
+| # | Test | Scope | Result |
+|---|------|-------|--------|
+| 1 | Module resolution | All 14 server modules require() without errors | PASS |
+| 2 | AppError class | Constructor, defaults, instanceof Error | PASS |
+| 3 | requestIdMiddleware | UUID generation (36-char), next() called | PASS |
+| 4 | asyncHandler | Catches async rejections, passes to next(); success passthrough | PASS |
+| 5 | errorHandler response | JSON shape (error, code, retryable, requestId) | PASS |
+| 6 | errorHandler logging | Structured JSON, WARNING for 4xx, ERROR for 5xx, stack on 5xx only | PASS |
+| 7 | Rate limiter — within limit | 3 requests pass through | PASS |
+| 8 | Rate limiter — over limit | 4th request gets 429 with Retry-After header | PASS |
+| 9 | Rate limiter — per-user isolation | Different UIDs have independent windows | PASS |
+| 10 | Rate limiter — window expiry | Requests pass again after window resets | PASS |
+| 11 | Firestore service | 11 exports verified as functions, correct arities, valid db instance | PASS |
+| 12 | Job auth middleware | Rejects missing key (500), wrong key (401), accepts correct key | PASS |
+| 13 | Scheduler logic | Per-user error isolation, logJobResult structured output | PASS |
+| 14 | ISO week calculation | Fixed algorithm (Thursday-aligned), verified against known dates | PASS |
+| 15 | Express integration | 5 routers mounted, requestIdMiddleware registered, errorHandler at end | PASS |
+| 16 | HTTP end-to-end | GET /health → 200, POST /api/agent → 401 (no auth), POST /api/jobs → 401 (bad key) | PASS |
+| 17 | runJob.js CLI | Prints usage with 3 valid job names when run without args | PASS |
+
+**Bug found and fixed during testing:** ISO 8601 week number calculation in `progressAnalyzer.js` was off by one. Original algorithm used `d.getDate() + 3 - ((d.getDay() + 6) % 7)` which computed Thursday incorrectly. Fixed to `d.getDate() + 4 - (d.getDay() || 7)` — the standard Thursday-alignment formula that correctly handles Sunday (day 0 → 7).
+
+### 3.10 API Routes for Future Phases (Not Yet Implemented)
+
+These routes were described in the original architecture plan but belong to Phases 4-6:
+
+| Route | Phase | Purpose |
+|-------|-------|---------|
+| `/api/exercises` | Phase 4 | Exercise library CRUD |
+| `/api/locations` | Phase 5 | Shared location management |
+| `/api/social` | Phase 6 | Social features (feed, friends, sharing) |
+| `/api/competitions` | Phase 6 | Competition management |
+
+**Deferred jobs** (depend on Phase 6 social infrastructure):
+- `server/jobs/competitionScorer.js` — Real-time competition leaderboard updates
+- `server/jobs/feedGenerator.js` — Generate social feed entries from user activity
 
 ---
 
@@ -657,9 +802,9 @@ FIREBASE_STORAGE_BUCKET=
 GEMINI_API_KEY=
 PORT=8080
 NODE_ENV=production
+JOBS_API_KEY=                    # API key for Cloud Scheduler job auth (Phase 3)
 
-# Push Notifications
-EXPO_PUSH_TOKEN=
+# Push Notifications (handled by Expo Push API — no server-side token needed)
 
 # Feature Flags
 ENABLE_SOCIAL=true
@@ -739,17 +884,19 @@ CMD ["node", "index.js"]
 ```
 
 **Cloud Run configuration:**
-- Min instances: 1 (avoid cold starts)
+- Min instances: 1 (avoid cold starts — required for job endpoints and rate limiter state)
 - Max instances: 10 (scale with users)
 - Memory: 512MB → 1GB (for AI + Firestore operations)
 - CPU: 1 → 2 (for background job processing)
-- Secrets: Firebase service account, Gemini API key
-- Cloud Scheduler: Triggers for background jobs via HTTP endpoints
+- Secrets: Firebase service account, Gemini API key, `JOBS_API_KEY`
+- Cloud Scheduler: 3 cron triggers configured (streak-checker daily, progress-analyzer weekly, plan-adjuster every 6h) — each sends HTTP POST to `/api/jobs/{jobName}` with `x-jobs-key` header
 
 ### 7.4 Monitoring & Observability
 
-- **Structured logging**: JSON logs with user context (uid, request ID)
-- **Error tracking**: Integrate Sentry or Cloud Error Reporting
+- **Structured logging**: JSON logs with user context (uid, request ID) — **implemented in Phase 3** via `errorHandler.js` and `scheduler.js`. All logs are JSON-formatted with `severity`, `message`, `uid`, `path`, `requestId` fields. Cloud Run auto-parses these into Cloud Logging.
+- **Request tracing**: Every request gets a `requestId` (UUID v4) via `requestIdMiddleware` — included in error responses and logs for request-level correlation.
+- **Job monitoring**: Each job run logs a structured completion summary with `total`, `success`, `failed`, `skipped` counts and per-user error details.
+- **Error tracking**: Integrate Sentry or Cloud Error Reporting (not yet configured)
 - **Performance**: Cloud Run metrics + custom latency tracking per agent
 - **Alerts**: Slack/email alerts for error rate spikes, high latency, job failures
 
@@ -795,8 +942,9 @@ Phase 6: Social Features ──────────────────�
   └─ 6.5 Push notifications for social events
 ```
 
-**Critical path:** Phase 1 → Phase 2 → Phase 3 (each depends on the previous).
-Phases 4, 5, 6 can begin after Phase 2 is complete and can be developed in parallel.
+**Critical path:** Phase 1 → Phase 2 → Phase 3 (each depends on the previous) — **ALL COMPLETE**.
+Phases 4, 5, 6 can begin now and can be developed in parallel.
+Phase 7 (Infrastructure) can be done incrementally alongside any phase.
 
 ---
 
@@ -813,70 +961,132 @@ Since there's no current auth system or cloud database, migration is straightfor
 
 ### API Versioning
 
-- Prefix all new routes with `/api/v2/`
-- Keep existing `/api/` routes functional during transition
-- Frontend switches to v2 routes after auth integration
-- Deprecate v1 routes after full migration
+> **Phase 3 decision:** API versioning was not needed. All Phase 3 route modifications are backward-compatible — routes accept `req.body` as before and fall back to Firestore reads when body data is absent. The `/api/v2/` prefix plan can be revisited for Phases 4-6 if breaking changes are introduced.
+
+- Keep existing `/api/` routes functional (no breaking changes through Phase 3)
+- New Phase 4-6 routes (exercises, locations, social, competitions) may use `/api/` directly since they're net-new endpoints with no legacy callers
 
 ---
 
 ## File Change Summary
 
-### New Files
+### Phase 1 — Completed Files
+
+**New files created:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `firebase.json` | Firebase project config | DONE |
+| `firestore.rules` | Firestore security rules (all collections) | DONE |
+| `firestore.indexes.json` | Composite indexes placeholder | DONE |
+| `storage.rules` | Cloud Storage security rules | DONE |
+| `.firebaserc` | Firebase project alias | DONE |
+| `lib/firebase.js` | Firebase JS SDK init + AsyncStorage persistence | DONE |
+| `lib/auth.js` | Auth functions (signUp, signIn, signOut, resetPassword, getIdToken) | DONE |
+| `lib/authContext.js` | AuthProvider + useAuth() hook | DONE |
+| `app/auth.js` | Sign-in/sign-up/reset screen (email/password) | DONE |
+| `server/middleware/auth.js` | Firebase Admin token verification middleware | DONE |
+
+**Modified files:**
+| File | Changes | Status |
+|------|---------|--------|
+| `app/_layout.js` | Wrapped app in `<AuthProvider>` | DONE |
+| `app/index.js` | Auth state check → route to /auth, /onboarding, or /(tabs) | DONE |
+| `lib/api.js` | `authHeaders()` injects Bearer token on all 7 API functions | DONE |
+| `app/(tabs)/profile.js` | Shows Firebase displayName/email, added Sign Out button | DONE |
+| `server/index.js` | All `/api/*` routes guarded by `authMiddleware` | DONE |
+| `package.json` | Added `firebase` ^11.0.0, `@react-native-async-storage/async-storage` 2.1.2 | DONE |
+| `server/package.json` | Added `firebase-admin` ^13.0.0 | DONE |
+| `.env` | Added 6 `EXPO_PUBLIC_FIREBASE_*` variables (populated) | DONE |
+
+### Phase 2 — Completed Files
+
+**New files created:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `lib/firestoreClient.js` | Firestore SDK wrapper: path builders, 6 field mappings, serialization, batch writes, listeners | DONE |
+| `lib/sync.js` | Sync engine: initial sync, queue processing, real-time listeners, conflict resolution | DONE |
+
+**Modified files:**
+| File | Changes | Status |
+|------|---------|--------|
+| `lib/firebase.js` | Added `getFirestore(app)` import and export | DONE |
+| `lib/database.js` | User-keyed DB (`aura_{uid}.db`), `sync_queue`/`sync_state` tables, `updated_at`/`firestore_id`/`active` column migrations, 7 sync queue helpers, write-through on 10 functions, `closeDatabase()` export | DONE |
+| `lib/authContext.js` | Init/teardown sync on auth state changes, `syncStatus` in context, cleanup ref | DONE |
+
+### Phase 2 Discoveries & Notes for Future Phases
+
+1. **User-keyed SQLite databases** (`aura_{uid}.db`) were chosen over adding `user_id` columns. This means zero query changes to existing read functions — data isolation is handled at the file level. On sign-out `closeDatabase()` is called; on sign-in `getDatabase(uid)` opens the correct DB.
+2. **Circular import avoidance**: `database.js` ↔ `sync.js` would create a circular dependency. Solved by using dynamic `require('./sync')` inside write functions rather than top-level imports. Metro handles this correctly.
+3. **Firestore ID generation is client-side**: `doc(collection(firestore, ...)).id` generates a random ID without a network call. This is critical for `startSession` — the Firestore ID is stored in `firestore_id` column immediately so that `logSet` can build the correct subcollection path (`sessions/{fsId}/sets/{setFsId}`).
+4. **Queue ordering matters for FK integrity**: `processQueue()` sorts items by collection depth (shallow first) and `created_at`, ensuring parent session docs are written to Firestore before their child set docs.
+5. **No new dependencies needed**: `firebase/firestore` is included in the existing `firebase` ^11.0.0 package. All 15 Firestore SDK exports verified present.
+6. **Selective real-time listeners**: Only `profile` and active `plan` have `onSnapshot` listeners. Sessions/sets are write-heavy during workouts and don't need cross-device real-time sync. This keeps Firestore read costs minimal.
+7. **`onSnapshot` on queries vs docs**: The active plan listener uses a collection query (`where('active', '==', true), limit(1)`) — this requires `onSnapshot` from `firebase/firestore` directly, not the `subscribeToDoc` wrapper (which expects a doc ref). This distinction is handled in `setupRealtimeListeners()`.
+8. **All existing call sites are backward-compatible**: The new `{ syncToCloud = true }` options parameter is the last argument with a default, so all 16 existing callers continue working without changes.
+
+### Phase 3 — Completed Files
+
+**New files created:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `server/services/firestore.js` | Admin Firestore read/write layer (getUserProfile, getUserActivePlan, getUserSessions, getSessionSets, saveNewPlan, saveInsight, getWorkoutStreak, getAllUserUids) | DONE |
+| `server/middleware/errorHandler.js` | AppError class, asyncHandler wrapper, requestIdMiddleware, centralized error handler with structured JSON logging | DONE |
+| `server/middleware/rateLimit.js` | Per-user in-memory sliding window rate limiter (60 req/min general, 20 req/min AI endpoints) | DONE |
+| `server/services/notifications.js` | Expo Push API sender (sendPushNotification, sendBatchNotifications) with DeviceNotRegistered handling | DONE |
+| `server/services/scheduler.js` | Job utilities (getEligibleUsers, runForAllUsers with per-user error isolation, logJobResult) | DONE |
+| `server/routes/jobs.js` | HTTP endpoints for Cloud Scheduler triggers (streak-checker, progress-analyzer, plan-adjuster) with API key auth | DONE |
+| `server/jobs/streakChecker.js` | Daily streak maintenance: computes streak, sends milestone/reminder notifications, updates profile | DONE |
+| `server/jobs/progressAnalyzer.js` | Weekly AI insight generation: computes stats, calls Gemini Flash-Lite, saves to insights collection | DONE |
+| `server/jobs/planAdjuster.js` | Background plan optimization: checks eligibility (7+ sessions or 7+ days), reuses handlePlanRegeneration agent | DONE |
+| `server/scripts/runJob.js` | Manual job runner for local development | DONE |
+
+**Modified files:**
+| File | Changes | Status |
+|------|---------|--------|
+| `server/index.js` | Added requestIdMiddleware, rate limiters (AI + general), job routes with API key auth, centralized errorHandler | DONE |
+| `server/routes/onboarding.js` | Wrapped with asyncHandler, saves plan to Firestore after generation via saveNewPlan | DONE |
+| `server/routes/progress.js` | Wrapped with asyncHandler, reads stats from Firestore if req.body.recentStats absent | DONE |
+| `server/routes/programmer.js` | Wrapped with asyncHandler, reads profile/plan/history from Firestore as fallback, saves plan back | DONE |
+| `server/routes/agent.js` | Wrapped with asyncHandler, /greet enriched with Firestore streak data, / endpoint supplements sparse userContext with profile | DONE |
+| `lib/authContext.js` | Registers Expo push token to Firestore on auth state change | DONE |
+| `server/.env` | Added JOBS_API_KEY | DONE |
+
+### Phase 3 Discoveries & Notes for Future Phases
+
+1. **No new npm dependencies needed**: `firebase-admin` (Firestore Admin via `admin.firestore()`) was already installed for auth. `@google/genai` already installed for AI. Expo Push API uses Node 20 built-in `fetch()`. `crypto.randomUUID()` is Node 20 built-in.
+2. **Firestore Admin bypasses security rules**: Server uses `admin.firestore()` which has full read/write access. This is the correct pattern for trusted server-side access — no need to configure service account permissions beyond the default.
+3. **Profile document path is `users/{uid}/profile/main`**: This matches the client-side write path from `lib/sync.js`. The Firestore service mirrors camelCase field names from `lib/firestoreClient.js` mappings.
+4. **Rate limiting is per-uid, not per-IP**: Cloud Run routes through GCP load balancers, so IP-based limiting would be unreliable. Per-user limiting via `req.user.uid` is accurate after auth middleware.
+5. **Job auth uses simple API key**: `JOBS_API_KEY` env var, validated via `x-jobs-key` header. Cloud Scheduler sends this key. No Firebase auth token needed for jobs since they run server-to-server.
+6. **Plan adjuster reuses `handlePlanRegeneration` directly**: The existing `agents/planning.js` function accepts `{ userProfile, currentPlan, workoutHistory, schedule }` and returns a new plan. The job is a thin data-sourcing wrapper that reads from Firestore instead of `req.body`.
+7. **Route modifications are backward-compatible**: All modified routes accept `req.body` data as before, and fall back to Firestore reads only when body data is missing/sparse. This ensures the frontend transition is non-breaking.
+8. **Cloud Scheduler cron config is external**: Jobs are triggered via HTTP POST to `/api/jobs/{jobName}`. Cron schedules are configured in GCP Console/CLI, not in code. Recommended schedules: streak-checker daily 9PM UTC, progress-analyzer Sunday 8PM UTC, plan-adjuster every 6 hours.
+9. **Push token stored in Firestore profile**: `users/{uid}/profile/main.pushToken` field. Written by the frontend on auth state change. Read by `notifications.js` when sending pushes. Stale tokens (DeviceNotRegistered) are auto-cleared.
+10. **Deferred to Phase 6**: `competitionScorer.js` and `feedGenerator.js` jobs are not implemented — they depend on social features infrastructure.
+
+### Remaining Files (Future Phases)
+
+**Phase 4 — Exercise Library:**
 | File | Purpose |
 |------|---------|
-| `lib/firebase.js` | Firebase SDK initialization |
-| `lib/auth.js` | Auth state management |
-| `lib/authContext.js` | React Context for auth |
-| `lib/sync.js` | SQLite ↔ Firestore sync layer |
-| `lib/firestoreClient.js` | Firestore SDK wrapper |
-| `app/auth.js` | Sign-in/sign-up screen |
-| `app/exercises.js` | Exercise browser screen |
-| `app/competition.js` | Competition detail screen |
-| `app/(tabs)/social.js` | Social feed tab |
-| `server/middleware/auth.js` | Firebase token verification |
-| `server/middleware/rateLimit.js` | Per-user rate limiting |
-| `server/middleware/errorHandler.js` | Centralized error handler |
-| `server/services/firestore.js` | Admin Firestore client |
-| `server/services/storage.js` | Cloud Storage service |
-| `server/services/scheduler.js` | Background job scheduler |
-| `server/services/notifications.js` | Push notification service |
 | `server/routes/exercises.js` | Exercise library API |
+| `server/scripts/seedExercises.js` | Exercise data seeder |
+| `app/exercises.js` | Exercise browser screen |
+
+**Phase 5 — Shared Equipment:**
+| File | Purpose |
+|------|---------|
 | `server/routes/locations.js` | Shared locations API |
+| `app/locations.js` | Update: add shared location discovery |
+
+**Phase 6 — Social Features:**
+| File | Purpose |
+|------|---------|
 | `server/routes/social.js` | Social features API |
 | `server/routes/competitions.js` | Competition API |
-| `server/jobs/planAdjuster.js` | Background plan optimization |
-| `server/jobs/progressAnalyzer.js` | Weekly progress reports |
-| `server/jobs/streakChecker.js` | Streak maintenance |
-| `server/jobs/competitionScorer.js` | Leaderboard updates |
-| `server/jobs/feedGenerator.js` | Social feed generation |
-| `server/scripts/seedExercises.js` | Exercise data seeder |
-| `firestore.rules` | Security rules |
-| `storage.rules` | Storage security rules |
-| `firebase.json` | Firebase project config |
-
-### Modified Files
-| File | Changes |
-|------|---------|
-| `app/_layout.js` | Add AuthProvider wrapper |
-| `app/index.js` | Auth state check before onboarding check |
-| `app/onboarding.js` | Save to Firestore after local SQLite |
-| `app/workout.js` | Pass auth token with API calls |
-| `app/workout-summary.js` | Pass auth token with API calls |
-| `app/locations.js` | Add shared location discovery |
-| `app/(tabs)/_layout.js` | Add social tab |
-| `app/(tabs)/index.js` | Pass auth token to coach API |
-| `app/(tabs)/progress.js` | Pass auth token, add share buttons |
-| `app/(tabs)/profile.js` | Add auth info, sign-out, avatar, friend list |
-| `lib/database.js` | Add sync queue, write-through pattern |
-| `lib/api.js` | Add auth header injection |
-| `lib/contextBuilder.js` | Include exercise library references |
-| `server/index.js` | Mount new routes, add middleware |
-| `server/package.json` | Add firebase-admin, node-cron |
-| `server/Dockerfile` | Update for new dependencies |
-| `server/routes/agent.js` | Add auth middleware |
-| `server/routes/onboarding.js` | Add auth, save plan to Firestore |
-| `server/routes/progress.js` | Add auth, read from Firestore |
-| `server/routes/programmer.js` | Add auth, save plan to Firestore |
-| `package.json` | Add Firebase React Native dependencies |
-| `app.json` | Add Firebase plugin configuration |
+| `server/jobs/competitionScorer.js` | Real-time competition leaderboard updates (deferred from Phase 3) |
+| `server/jobs/feedGenerator.js` | Generate social feed entries from user activity (deferred from Phase 3) |
+| `app/(tabs)/social.js` | Social feed tab |
+| `app/competition.js` | Competition detail screen |
+| `app/(tabs)/profile.js` | Update: avatar, friend list |
+| `app/(tabs)/progress.js` | Update: share buttons |

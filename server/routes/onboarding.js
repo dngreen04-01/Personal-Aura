@@ -1,5 +1,7 @@
 const express = require('express');
 const { GoogleGenAI } = require('@google/genai');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { saveNewPlan } = require('../services/firestore');
 const router = express.Router();
 
 const MODEL_NAME = 'gemini-3.1-flash-lite-preview';
@@ -49,25 +51,24 @@ Output Schema:
   }
 ]`;
 
-router.post('/', async (req, res) => {
-  try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
-    }
+router.post('/', asyncHandler(async (req, res) => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
+  }
 
-    const { goal, equipment, baselines, schedule } = req.body;
+  const { goal, equipment, baselines, schedule } = req.body;
 
-    const exerciseLines = baselines?.exercises
-      ? Object.entries(baselines.exercises)
-          .map(([name, data]) => `${name}: ${data.weight}kg x ${data.reps} reps`)
-          .join('\n')
-      : 'No baseline data provided';
+  const exerciseLines = baselines?.exercises
+    ? Object.entries(baselines.exercises)
+        .map(([name, data]) => `${name}: ${data.weight}kg x ${data.reps} reps`)
+        .join('\n')
+    : 'No baseline data provided';
 
-    const daysPerWeek = schedule?.daysPerWeek || 7;
-    const minutesPerSession = schedule?.minutesPerSession || 60;
+  const daysPerWeek = schedule?.daysPerWeek || 7;
+  const minutesPerSession = schedule?.minutesPerSession || 60;
 
-    const promptMessage = `
+  const promptMessage = `
 Goal: ${goal}
 Equipment: ${equipment}
 Age: ${baselines?.age || 'Unknown'}
@@ -81,58 +82,67 @@ ${exerciseLines}
 
 Please generate a ${daysPerWeek}-day workout split in JSON. IMPORTANT: Every exercise must have a numeric targetWeight (e.g. "80kg", "12.5kg") calculated from the strength assessment above. Do NOT use text descriptions in targetWeight. Include restSeconds for each exercise.`;
 
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: promptMessage,
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-      },
-    });
+  const ai = new GoogleGenAI({ apiKey });
+  const response = await ai.models.generateContent({
+    model: MODEL_NAME,
+    contents: promptMessage,
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json',
+    },
+  });
 
-    const responseText = response.text;
-    const plan = JSON.parse(responseText);
+  const responseText = response.text;
+  const plan = JSON.parse(responseText);
 
-    // Validate and normalize targetWeight for every exercise
-    if (Array.isArray(plan)) {
-      for (const day of plan) {
-        if (Array.isArray(day.exercises)) {
-          for (const exercise of day.exercises) {
-            const raw = exercise.targetWeight;
-            if (raw == null || raw === '') {
-              console.warn(`[Onboarding] Missing targetWeight for: ${exercise.name}`);
+  // Validate and normalize targetWeight for every exercise
+  if (Array.isArray(plan)) {
+    for (const day of plan) {
+      if (Array.isArray(day.exercises)) {
+        for (const exercise of day.exercises) {
+          const raw = exercise.targetWeight;
+          if (raw == null || raw === '') {
+            console.warn(`[Onboarding] Missing targetWeight for: ${exercise.name}`);
+            exercise.targetWeight = '0kg';
+          } else if (typeof raw === 'number') {
+            exercise.targetWeight = `${raw}kg`;
+          } else if (typeof raw === 'string') {
+            const numMatch = raw.match(/(\d+\.?\d*)/);
+            if (numMatch) {
+              exercise.targetWeight = `${parseFloat(numMatch[1])}kg`;
+            } else {
+              console.warn(`[Onboarding] Non-numeric targetWeight for ${exercise.name}: "${raw}"`);
               exercise.targetWeight = '0kg';
-            } else if (typeof raw === 'number') {
-              exercise.targetWeight = `${raw}kg`;
-            } else if (typeof raw === 'string') {
-              // Extract numeric value from string — handles "80kg", "80", or text descriptions
-              const numMatch = raw.match(/(\d+\.?\d*)/);
-              if (numMatch) {
-                exercise.targetWeight = `${parseFloat(numMatch[1])}kg`;
-              } else {
-                console.warn(`[Onboarding] Non-numeric targetWeight for ${exercise.name}: "${raw}"`);
-                exercise.targetWeight = '0kg';
-              }
             }
+          }
 
-            // Ensure restSeconds is present
-            if (!exercise.restSeconds) {
-              exercise.restSeconds = 90;
-            }
+          if (!exercise.restSeconds) {
+            exercise.restSeconds = 90;
           }
         }
       }
     }
-
-    console.log('[Onboarding] Plan generated with', plan.length, 'days,',
-      plan.reduce((sum, d) => sum + (d.exercises?.length || 0), 0), 'total exercises');
-
-    res.json({ plan });
-  } catch (error) {
-    console.error('Onboarding API Error:', error);
-    res.status(500).json({ error: error.message });
   }
-});
+
+  console.log('[Onboarding] Plan generated with', plan.length, 'days,',
+    plan.reduce((sum, d) => sum + (d.exercises?.length || 0), 0), 'total exercises');
+
+  // Persist plan to Firestore
+  if (req.user?.uid) {
+    try {
+      await saveNewPlan(req.user.uid, plan, 'onboarding');
+    } catch (err) {
+      console.error(JSON.stringify({
+        severity: 'WARNING',
+        message: 'Failed to save plan to Firestore',
+        uid: req.user.uid,
+        error: err.message,
+      }));
+      // Non-blocking — client still gets the plan in response
+    }
+  }
+
+  res.json({ plan });
+}));
 
 module.exports = router;
