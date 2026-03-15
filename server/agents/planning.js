@@ -1,6 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 
-const MODEL_NAME = 'gemini-2.5-pro';
+const MODEL_NAME = 'gemini-3.1-pro-preview';
 
 const MUSCLE_TAXONOMY = `Muscle Group Taxonomy:
 - Push: Chest (pectoralis major/minor), Anterior Deltoid, Triceps

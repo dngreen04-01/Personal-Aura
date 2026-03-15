@@ -38,10 +38,15 @@ function classifyIntent(message) {
     'different exercise', "can't do", 'hurts', 'injured', 'injury', 'pain'];
   if (swapKw.some(k => lower.includes(k))) return 'swap';
 
-  // Plan modification: workout-level changes
-  const planKw = ['modify plan', 'change plan', 'easier workout', 'harder workout',
+  // Plan modification: workout-level changes, custom requests, equipment-specific workouts
+  const planKw = ['modify plan', 'change plan', 'change my workout', 'change the workout',
+    'change today', 'custom workout', 'make me a', 'make a workout', 'build me a',
+    'different workout', 'new workout', 'want to do', 'rather do', 'instead do',
+    'easier workout', 'harder workout', 'shorter workout', 'longer workout',
     'lighter today', 'today lighter', 'make today', 'heavier today', 'today heavier',
-    'at home', 'no equipment', 'easier today', 'today easier'];
+    'easier today', 'today easier', 'at home', 'no equipment',
+    'only have', 'just have', 'kettlebell', 'dumbbell only', 'bodyweight only',
+    'minute workout', 'min workout'];
   if (planKw.some(k => lower.includes(k))) return 'plan_modify';
 
   // Progressive overload: weight progression queries

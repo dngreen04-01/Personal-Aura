@@ -445,6 +445,48 @@ export default function WorkoutScreen() {
         </View>
       </View>
 
+      {/* Exercise List */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.exerciseStrip}
+        contentContainerStyle={styles.exerciseStripContent}
+      >
+        {exercises.map((ex, i) => {
+          const isCurrent = i === currentExIdx;
+          const isDone = i < currentExIdx;
+          return (
+            <TouchableOpacity
+              key={`${ex.name}-${i}`}
+              style={[
+                styles.exercisePill,
+                isCurrent && styles.exercisePillActive,
+                isDone && styles.exercisePillDone,
+              ]}
+              onPress={() => {
+                setCurrentExIdx(i);
+                setCurrentSet(1);
+              }}
+              activeOpacity={0.7}
+            >
+              {isDone && (
+                <MaterialIcons name="check-circle" size={14} color={colors.primary} />
+              )}
+              <Text
+                style={[
+                  styles.exercisePillText,
+                  isCurrent && styles.exercisePillTextActive,
+                  isDone && styles.exercisePillTextDone,
+                ]}
+                numberOfLines={1}
+              >
+                {ex.name}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
       {/* Main Content */}
       <ScrollView style={styles.mainScroll} contentContainerStyle={styles.mainContent}>
         {isResting ? (
@@ -901,6 +943,27 @@ const styles = StyleSheet.create({
   progressPercent: { fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.primary, letterSpacing: 1.5 },
   progressTrack: { height: 6, borderRadius: 3, backgroundColor: 'rgba(212,255,0,0.1)', overflow: 'hidden' },
   progressFill: { height: '100%', borderRadius: 3, backgroundColor: colors.primary },
+
+  // Exercise strip
+  exerciseStrip: { maxHeight: 40, flexGrow: 0, borderBottomWidth: 1, borderBottomColor: 'rgba(212,255,0,0.08)' },
+  exerciseStripContent: { paddingHorizontal: spacing.md, gap: spacing.xs, alignItems: 'center' },
+  exercisePill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
+    borderRadius: radius.full, backgroundColor: 'rgba(212,255,0,0.06)',
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.08)',
+  },
+  exercisePillActive: {
+    backgroundColor: colors.primary, borderColor: colors.primary,
+  },
+  exercisePillDone: {
+    backgroundColor: 'rgba(212,255,0,0.1)', borderColor: 'rgba(212,255,0,0.2)',
+  },
+  exercisePillText: {
+    fontSize: 12, fontFamily: 'Inter_500Medium', color: colors.textMuted, maxWidth: 120,
+  },
+  exercisePillTextActive: { color: colors.bgDark, fontFamily: 'Inter_700Bold' },
+  exercisePillTextDone: { color: colors.primary },
 
   // Main content
   mainScroll: { flex: 1 },

@@ -1,6 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 
-const MODEL_NAME = 'gemini-2.0-flash-exp';
+const MODEL_NAME = 'gemini-3.1-flash-image-preview';
 
 const SYSTEM_PROMPT = `You are a fitness exercise visualization specialist. You create clear, instructional illustrations of exercises focusing on:
 - Proper form and body positioning
