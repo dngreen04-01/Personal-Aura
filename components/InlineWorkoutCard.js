@@ -36,7 +36,7 @@ export default function InlineWorkoutCard({ workout, onStart }) {
         ))}
       </View>
 
-      <TouchableOpacity style={styles.startButton} onPress={onStart} activeOpacity={0.8}>
+      <TouchableOpacity style={styles.startButton} onPress={() => onStart(workout)} activeOpacity={0.8}>
         <Text style={styles.startButtonText}>Start Workout</Text>
         <Ionicons name="play" size={16} color={colors.bgDark} />
       </TouchableOpacity>

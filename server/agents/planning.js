@@ -119,46 +119,11 @@ You MUST respond with valid JSON matching this exact schema:
 /**
  * Handle broader plan modification requests.
  * e.g. "make today lighter", "I'm at home, modify workout"
+ * Delegates to handleWorkoutModification so the response includes a workoutCard
+ * (which the frontend renders) instead of planModification (which it ignores).
  */
 async function handlePlanModification(message, agentContext) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY missing');
-
-  const systemPrompt = `${BASE_IDENTITY}
-
-Your task: Modify the user's workout plan based on their request (e.g. make it lighter/harder, adapt for different equipment or location).
-
-For each exercise modification, explain the reasoning — why the replacement targets the same muscle groups and suits the user's current constraints.
-
-Equipment awareness: Only suggest exercises the user can perform with their available equipment.
-
-You MUST respond with valid JSON matching this exact schema:
-{
-  "text": "Brief 1-2 sentence message to the user",
-  "planModification": {
-    "modifiedExercises": [
-      {
-        "original": "Original exercise name",
-        "replacement": "Replacement exercise name",
-        "reason": "Why this replacement works — muscles targeted, equipment needed, intensity adjustment"
-      }
-    ]
-  }
-}`;
-
-  const userPrompt = buildPlanningPrompt(message, agentContext);
-
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: MODEL_NAME,
-    contents: userPrompt,
-    config: {
-      systemInstruction: systemPrompt,
-      responseMimeType: 'application/json',
-    },
-  });
-
-  return JSON.parse(response.text);
+  return handleWorkoutModification(message, agentContext);
 }
 
 /**
@@ -224,9 +189,12 @@ async function handleWorkoutModification(argsOrMessage, agentContext) {
     // From router — argsOrMessage is the user's message string
     instructions = typeof argsOrMessage === 'string' ? argsOrMessage : argsOrMessage.message || '';
     currentExercises = agentContext.workout?.exercises || [];
-    // Determine type from context
-    modificationType = instructions.toLowerCase().includes('completely different') ||
-                       instructions.toLowerCase().includes('something else') ? 'replace' : 'adjust';
+    // Determine type: custom/new workout creation → replace, tweaks → adjust
+    const lowerInst = instructions.toLowerCase();
+    const isReplacement = ['completely different', 'something else', 'custom workout',
+      'make me a', 'build me a', 'new workout', 'make a workout',
+      'want to do', 'rather do', 'instead do'].some(k => lowerInst.includes(k));
+    modificationType = isReplacement ? 'replace' : 'adjust';
   }
 
   const contextBlock = agentContext.workout ?

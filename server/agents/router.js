@@ -20,8 +20,8 @@ function withTimeout(promise, ms, label) {
 // Per-agent timeout budgets (ms)
 const TIMEOUTS = {
   memory: 2000,
-  orchestrator: 15000,  // generous for function-calling round-trips
-  planning: 15000,
+  orchestrator: 25000,  // generous for function-calling round-trips
+  planning: 30000,      // Pro model needs more time for structured JSON
   visual: 30000,
   motivation: 500,
 };
@@ -49,22 +49,22 @@ function classifyIntent(message) {
     "hurts", "injured", "fatigue", "exhausted", "not feeling great"];
   if (injuryKw.some(k => lower.includes(k))) return 'injury';
 
-  // Replace: completely different workout (check BEFORE modify)
+  // Replace: new/custom workout requests (check BEFORE modify)
   const replaceKw = ['completely different', 'skip the plan', 'something else entirely',
     'different type of workout', 'outdoor workout', 'want to do yoga',
-    'scrap this', 'different workout', 'change everything'];
+    'scrap this', 'different workout', 'change everything',
+    // Custom workout creation — needs full workoutCard, not planModification
+    'custom workout', 'make me a', 'make a workout', 'build me a',
+    'new workout', 'want to do', 'rather do', 'instead do'];
   if (replaceKw.some(k => lower.includes(k))) return 'replace';
 
-  // Modify: tweak existing workout (merged from old plan_modify)
+  // Modify: tweak existing workout
   const modifyKw = ['make it shorter', 'make it longer', 'fewer sets', 'more sets',
     'fewer exercises', 'more exercises', 'less rest', 'more rest', 'lighter',
     'heavier', 'easier', 'harder', 'modify', 'adjust', 'change', 'shorten',
     'add more', 'remove', 'less volume', 'more volume', 'quick workout',
-    // Include old plan_modify keywords too
     'change my plan', 'modify plan', 'update plan', 'adjust plan',
     'change my workout', 'change the workout', 'change today',
-    'custom workout', 'make me a', 'make a workout', 'build me a',
-    'new workout', 'want to do', 'rather do', 'instead do',
     'easier workout', 'harder workout', 'shorter workout', 'longer workout',
     'lighter today', 'today lighter', 'make today', 'heavier today', 'today heavier',
     'easier today', 'today easier', 'at home', 'no equipment',
@@ -217,12 +217,23 @@ async function routeRequest({ message, history, userContext }) {
   const agentContext = buildAgentContext(userContext);
   const memoryLatency = Date.now() - memoryStart;
 
+  let result;
   const orchestratorStart = Date.now();
-  const result = await withTimeout(
-    handleMessage({ message, history, userContext }),
-    TIMEOUTS.orchestrator,
-    'Orchestrator'
-  );
+  try {
+    result = await withTimeout(
+      handleMessage({ message, history, userContext }),
+      TIMEOUTS.orchestrator,
+      'Orchestrator'
+    );
+  } catch (err) {
+    console.error('Orchestrator failed:', err.message);
+    const totalLatency = Date.now() - startTime;
+    return buildAgentResponse({
+      text: "I'm having trouble processing that right now. Could you try rephrasing, or let me know what you'd like to do?",
+      agentsUsed: [AGENTS.orchestrator, AGENTS.memory],
+      latency: { total: totalLatency },
+    });
+  }
   const orchestratorLatency = Date.now() - orchestratorStart;
 
   // --- Motivation Engine: evaluate after log_set function calls ---
@@ -274,6 +285,7 @@ async function routeRequest({ message, history, userContext }) {
     text: result.text,
     functionCall: result.functionCall,
     swapSuggestion: result.swapSuggestion,
+    workoutCard: result.workoutCard,
     motivationDirective,
     agentsUsed,
     latency: {

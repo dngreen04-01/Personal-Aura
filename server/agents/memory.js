@@ -24,6 +24,7 @@ function buildAgentContext(userContext) {
     },
     workout: {
       day: ctx.currentDay?.focus || ctx.currentDay?.day || null,
+      exercises: ctx.currentDay?.exercises || null,
       currentExercise: ctx.currentExercise || null,
       currentSet: ctx.currentSet || null,
       totalSets: ctx.totalSets || null,
@@ -113,7 +114,7 @@ Write 2-3 sentences. Reference specific stats (volume, exercises, sets). Be genu
  * Build a greeting context string from user data for the pre-workout greeting.
  * Pure function — formats the data for the greeting system prompt.
  */
-function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWorkoutDate, todayFocus, todayExerciseCount, goal, equipment }) {
+function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWorkoutDate, todayFocus, todayExerciseCount, goal, equipment, progressSummary }) {
   const parts = [];
 
   if (goal) parts.push(`User's goal: ${goal}`);
@@ -125,8 +126,18 @@ function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWork
     parts.push(`Last workout: ${lastWorkoutFocus}${lastDate}`);
   }
   if (todayFocus) {
-    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises` : '';
+    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises (~${todayExerciseCount * 4} min)` : '';
     parts.push(`Today's scheduled workout: ${todayFocus}${exerciseInfo}`);
+  }
+  if (progressSummary) {
+    if (progressSummary.volumeTrend != null) {
+      const direction = progressSummary.volumeTrend >= 0 ? 'up' : 'down';
+      parts.push(`Recent volume trend: ${direction} ${Math.abs(progressSummary.volumeTrend)}% vs prior sessions`);
+    }
+    if (progressSummary.recentPRs && progressSummary.recentPRs.length > 0) {
+      const prList = progressSummary.recentPRs.map(pr => `${pr.exercise_name} (${pr.max_weight}${pr.weight_unit || 'kg'})`).join(', ');
+      parts.push(`Recent personal records: ${prList}`);
+    }
   }
 
   return parts.length > 0 ? `User Context:\n${parts.join('\n')}` : '';

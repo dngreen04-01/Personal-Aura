@@ -8,7 +8,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
 import { sendAgentMessage, submitPlanRegeneration, greetUser } from '../../lib/api';
-import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation, getGreetingData } from '../../lib/database';
+import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation, getGreetingData, getRecentProgressSummary } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
 import ImageMessage from '../../components/ImageMessage';
@@ -77,6 +77,7 @@ export default function ChatScreen() {
 
           // AI greeting instead of static messages
           try {
+            const progressSummary = await getRecentProgressSummary();
             const greeting = await greetUser({
               goal: profile?.goal,
               equipment: profile?.equipment,
@@ -86,6 +87,7 @@ export default function ChatScreen() {
               lastWorkoutDate: greetingData.lastWorkoutDate,
               todayFocus: firstWorkout?.focus,
               todayExerciseCount: firstWorkout?.exercises?.length,
+              progressSummary,
             });
             setMessages([{ role: 'model', text: greeting.text }]);
           } catch {
@@ -156,7 +158,7 @@ export default function ChatScreen() {
         const wc = data.workoutCard;
         setTodayWorkout({ focus: wc.focus, exercises: wc.exercises, day: todayWorkout?.day });
 
-        // Persist adjustments to DB
+        // Persist custom/adjusted workouts to plan so they survive round-trips
         if (wc.modificationType === 'adjust' && plan) {
           const updatedPlan = plan.map(day =>
             day.day === todayWorkout?.day ? { ...day, exercises: wc.exercises, focus: wc.focus } : day
@@ -173,12 +175,17 @@ export default function ChatScreen() {
     }
   };
 
-  const handleStartWorkout = () => {
-    if (todayWorkout) {
+  const handleStartWorkout = (workoutOverride) => {
+    const workout = workoutOverride || todayWorkout;
+    if (workout) {
+      // Ensure todayWorkout state is in sync with what we're starting
+      if (workoutOverride) {
+        setTodayWorkout(prev => ({ ...prev, focus: workout.focus, exercises: workout.exercises }));
+      }
       router.push({
         pathname: '/workout-summary',
         params: {
-          dayJson: JSON.stringify(todayWorkout),
+          dayJson: JSON.stringify(workout),
           ...(selectedLocation ? { locationJson: JSON.stringify(selectedLocation) } : {}),
         },
       });
