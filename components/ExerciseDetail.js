@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, Modal, ScrollView, TouchableOpacity, StyleSheet,
+  Image, ActivityIndicator,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing, radius, fonts } from '../lib/theme';
@@ -12,9 +13,12 @@ const DIFFICULTY_COLORS = {
 };
 
 export default function ExerciseDetail({ exercise, visible, onClose, onSwap, showSwapButton }) {
+  const [imageLoading, setImageLoading] = useState(true);
+
   if (!exercise) return null;
 
   const diffColor = DIFFICULTY_COLORS[exercise.difficulty] || colors.textSecondary;
+  const mediaUri = exercise.gifUrl || exercise.imageUrl;
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
@@ -29,6 +33,26 @@ export default function ExerciseDetail({ exercise, visible, onClose, onSwap, sho
           </View>
 
           <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+            {/* Exercise Media */}
+            {mediaUri && (
+              <View style={styles.mediaSection}>
+                <Image
+                  source={{ uri: mediaUri }}
+                  style={styles.exerciseImage}
+                  resizeMode="contain"
+                  onLoadStart={() => setImageLoading(true)}
+                  onLoadEnd={() => setImageLoading(false)}
+                />
+                {imageLoading && (
+                  <ActivityIndicator
+                    style={styles.imageLoader}
+                    size="large"
+                    color={colors.primary}
+                  />
+                )}
+              </View>
+            )}
+
             {/* Badges */}
             <View style={styles.badgeRow}>
               <Badge label={exercise.category} color={colors.primary} />
@@ -81,9 +105,7 @@ export default function ExerciseDetail({ exercise, visible, onClose, onSwap, sho
             {exercise.alternatives?.length > 0 && (
               <Section title="Alternatives">
                 {exercise.alternatives.map((alt) => (
-                  <Text key={alt} style={styles.altText}>
-                    {alt.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                  </Text>
+                  <Text key={alt} style={styles.altText}>{alt}</Text>
                 ))}
               </Section>
             )}
@@ -153,6 +175,21 @@ const styles = StyleSheet.create({
   scroll: {
     paddingHorizontal: spacing.lg,
   },
+  mediaSection: {
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    backgroundColor: colors.bgCardSolid,
+  },
+  exerciseImage: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+  },
+  imageLoader: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   badgeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -168,7 +205,6 @@ const styles = StyleSheet.create({
   badgeText: {
     ...fonts.semibold,
     fontSize: 11,
-    textTransform: 'capitalize',
   },
   section: {
     marginTop: spacing.lg,
@@ -223,7 +259,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.primaryDim,
     marginBottom: spacing.xs,
-    textTransform: 'capitalize',
   },
   swapButton: {
     flexDirection: 'row',

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -94,9 +94,13 @@ export default function ExerciseBrowserScreen() {
       onPress={() => setSelectedExercise(item)}
       activeOpacity={0.7}
     >
-      <View style={styles.exerciseIcon}>
-        <MaterialIcons name="fitness-center" size={22} color={colors.primary} />
-      </View>
+      {item.thumbnailUrl ? (
+        <Image source={{ uri: item.thumbnailUrl }} style={styles.exerciseThumbnail} />
+      ) : (
+        <View style={styles.exerciseIcon}>
+          <MaterialIcons name="fitness-center" size={22} color={colors.primary} />
+        </View>
+      )}
       <View style={styles.exerciseInfo}>
         <Text style={styles.exerciseName} numberOfLines={1}>{item.name}</Text>
         <Text style={styles.exerciseMeta} numberOfLines={1}>
@@ -207,6 +211,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderLight,
   },
+  exerciseThumbnail: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primaryGhost,
+  },
   exerciseIcon: {
     width: 44,
     height: 44,
@@ -246,7 +256,6 @@ const styles = StyleSheet.create({
     ...fonts.medium,
     fontSize: 10,
     color: colors.primaryDim,
-    textTransform: 'capitalize',
   },
   centered: {
     flex: 1,

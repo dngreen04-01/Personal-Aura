@@ -1,0 +1,50 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**']
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # Required for Workload Identity Federation
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and deploy to Cloud Run
+        working-directory: server
+        run: |
+          gcloud builds submit --tag gcr.io/aura-fitness-api/aura-api
+
+          gcloud run deploy aura-api \
+            --image gcr.io/aura-fitness-api/aura-api \
+            --region us-central1 \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 1Gi \
+            --cpu 2 \
+            --min-instances 1 \
+            --max-instances 10 \
+            --set-secrets "GEMINI_API_KEY=gemini-api-key:latest,JOBS_API_KEY=jobs-api-key:latest" \
+            --set-env-vars "NODE_ENV=production,PORT=8080"
+
+      - name: Show service URL
+        run: |
+          gcloud run services describe aura-api \
+            --region us-central1 \
+            --project aura-fitness-api \
+            --format="value(status.url)"

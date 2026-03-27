@@ -20,10 +20,10 @@ This document outlines the full production refactoring of the Aura fitness coach
 | **Phase 1: Firebase Auth** | COMPLETE | 2026-03-15 |
 | **Phase 2: Cloud Database** | COMPLETE | 2026-03-15 |
 | **Phase 3: Backend Autonomy** | COMPLETE | 2026-03-15 |
-| **Phase 4: Exercise Library** | NOT STARTED | — |
-| **Phase 5: Shared Equipment** | NOT STARTED | — |
+| **Phase 4: Exercise Library** | COMPLETE | 2026-03-15 |
+| **Phase 5: Shared Equipment** | COMPLETE | 2026-03-15 |
 | **Phase 6: Social Features** | NOT STARTED | — |
-| **Phase 7: Infrastructure** | NOT STARTED | — |
+| **Phase 7: Infrastructure** | COMPLETE | 2026-03-26 |
 
 ---
 
@@ -35,8 +35,8 @@ This document outlines the full production refactoring of the Aura fitness coach
 | **Database** | Firestore (cloud) + SQLite (local cache) with write-through sync | Firestore (cloud) + SQLite (local cache) |
 | **Backend** | Autonomous Express on Cloud Run with Firestore reads, background jobs, push notifications | Stateful user-aware service with background jobs |
 | **Frontend** | Tightly coupled to local DB (auth token on all API calls) | API-first with offline-capable local cache |
-| **Media** | None | Cloud Storage exercise library |
-| **Social** | None | Shared gyms, progress sharing, competitions |
+| **Media** | Exercise data in Firestore, images/GIFs deferred (local placeholders) | Cloud Storage exercise library with media URLs |
+| **Social** | Shared gym locations with community contributions | Progress sharing, friend system, competitions |
 
 ---
 
@@ -625,63 +625,87 @@ These routes were described in the original architecture plan but belong to Phas
 
 ---
 
-## Phase 4: Exercise Library & Media
+## Phase 4: Exercise Library & Media — COMPLETE
 
-### 4.1 Cloud Storage Structure
+> **Completed:** 2026-03-15
+> **Status:** Exercise data seeded to Firestore from `Docs/Exercise_Reference.json`. Frontend exercise browser, detail view, and workout integration implemented. Exercise media (images/GIFs) deferred — using local placeholders for now.
 
+### 4.1 Exercise Data — Seeded to Firestore
+
+The exercise library was provided as a curated JSON file (`Docs/Exercise_Reference.json`) and uploaded to the Firestore `exercises/` collection via `server/scripts/seedExercises.js`.
+
+**Seed script features:**
+- Reads `Docs/Exercise_Reference.json` (concatenated JSON arrays handled)
+- Transforms raw data: infers `category` (Push/Pull/Legs/Core/Cardio/Compound) from tags and primary muscles
+- Infers `difficulty` (beginner/intermediate/advanced) from tags
+- Uses slug of exercise name as Firestore document ID (e.g., `barbell-back-squat`)
+- Batch writes (450 per batch) with `merge: true` to preserve existing media URLs
+- Idempotent — safe to re-run
+
+**Usage:** `node server/scripts/seedExercises.js`
+
+### 4.2 Exercise Media — Deferred (Using Placeholders)
+
+Exercise images and GIFs will be generated later in development. For now, local placeholder assets exist at:
+
+```
+/Users/damiengreen/Downloads/exercise_assets (1)/
+├── 1_barbell_back_squat/
+│   ├── animation.gif          # Animated demo placeholder
+│   ├── image.png              # Static form image placeholder
+│   └── thumbnail.png          # Thumbnail placeholder
+├── 2_standard_push_up/
+│   └── ...
+└── ...
+```
+
+**Cloud Storage structure (planned, not yet populated):**
 ```
 gs://aura-fitness-media/
 ├── exercises/
-│   ├── images/
-│   │   ├── barbell-bench-press.webp         # Static form image
-│   │   ├── barbell-squat.webp
-│   │   └── ...
-│   ├── gifs/
-│   │   ├── barbell-bench-press.gif          # Animated demo
-│   │   ├── barbell-squat.gif
-│   │   └── ...
-│   └── thumbnails/
-│       ├── barbell-bench-press-thumb.webp   # 150x150 thumbnail
-│       └── ...
+│   ├── images/{slug}.webp         # Static form image
+│   ├── gifs/{slug}.gif            # Animated demo
+│   └── thumbnails/{slug}-thumb.webp   # 150x150 thumbnail
 ├── avatars/
-│   └── {uid}/
-│       └── profile.webp                     # User avatar
+│   └── {uid}/profile.webp        # User avatar (Phase 6)
 └── social/
-    └── {postId}/
-        └── media.webp                       # Shared images
+    └── {postId}/media.webp       # Shared images (Phase 6)
 ```
 
-### 4.2 Exercise Data Seeding
+**Upload pipeline** (`server/scripts/generateExerciseMedia.js`) exists as a scaffold. When media is ready, it will upload assets to Cloud Storage and update Firestore `exercises/` docs with `imageUrl`, `gifUrl`, `thumbnailUrl` fields. The seed script uses `merge: true` so media URL fields will be preserved across re-seeds.
 
-**Seed script:** `server/scripts/seedExercises.js`
+### 4.3 Firestore Service — Exercise Functions
 
-- Parse a curated exercise dataset (300+ exercises)
-- Upload images/GIFs to Cloud Storage
-- Create Firestore documents in `exercises/` collection
-- Categories: Push, Pull, Legs, Core, Cardio, Flexibility
-- Equipment tags: barbell, dumbbell, cable, machine, bodyweight, bands, kettlebell
+Added to `server/services/firestore.js`:
+| Function | Purpose |
+|----------|---------|
+| `getExercises({ category, equipment, difficulty, muscle, search, limit, startAfter })` | Paginated exercise query with client-side text search |
+| `getExerciseById(exerciseId)` | Single exercise lookup |
+| `getExercisesByNames(names)` | Batch lookup by name (chunks of 30 for Firestore `in` limit) |
+| `getExerciseAlternatives(exerciseId)` | Returns alternative exercises by name reference |
 
-**Data sources (to curate):**
-- Open-source exercise databases (e.g., wger.de API, ExerciseDB)
-- Custom photography/GIFs for key compound movements
-- AI-generated form illustrations via Visual Agent (supplement gaps)
-
-### 4.3 Frontend Exercise Browser
+### 4.4 Frontend Exercise Browser
 
 **New screen:** `app/exercises.js`
 - Searchable, filterable exercise catalog
 - Filter by: muscle group, equipment, difficulty
 - Each exercise shows: name, thumbnail, primary muscles, equipment needed
-- Tap for detail: full image/GIF, instructions, tips, alternatives
+- Tap for detail view
+
+**New component:** `components/ExerciseDetail.js`
+- Full exercise detail: image/GIF, instructions, tips, alternatives
+- Equipment requirements and difficulty badge
 
 **Integration with existing features:**
 - Exercise swap widget pulls from exercise library instead of AI-only suggestions
-- Onboarding assessment references canonical exercise IDs
 - Workout screen shows exercise media inline
 
 ---
 
-## Phase 5: Shared Equipment Database
+## Phase 5: Shared Equipment Database — COMPLETE
+
+> **Completed:** 2026-03-15
+> **Status:** All code implemented. Shared locations API, community contribution model, and frontend location discovery screen implemented.
 
 ### 5.1 Location Sharing Flow
 
@@ -716,6 +740,28 @@ gs://aura-fitness-media/
 - "Claim This Gym" links shared location to user's profile
 - "Add Equipment" / "Report Missing" for community contributions
 - Equipment list syncs to AI coach context (knows what's available)
+
+### 5.4 Firestore Service — Shared Location Functions
+
+Added to `server/services/firestore.js`:
+| Function | Purpose |
+|----------|---------|
+| `getSharedLocations({ lat, lon, radiusKm, search, limit })` | Proximity-based location search with text filtering |
+| `getSharedLocationById(locationId)` | Single location lookup |
+| `createSharedLocation({ name, address, lat, lon, equipment, createdBy })` | Create new shared location |
+| `addEquipmentContribution(locationId, uid, equipmentId)` | Add equipment with contributor tracking |
+| `reportMissingEquipment(locationId, uid, equipmentId)` | Report missing equipment (auto-removes at 2+ votes) |
+| `claimSharedLocation(locationId, uid)` | Claim/join a shared location |
+
+### 5.5 API Route — `server/routes/locations.js`
+
+Shared locations REST API with auth middleware. Supports:
+- `GET /api/locations` — search by proximity and text
+- `GET /api/locations/:id` — get location detail
+- `POST /api/locations` — create new location
+- `POST /api/locations/:id/equipment` — contribute equipment
+- `POST /api/locations/:id/missing` — report missing equipment
+- `POST /api/locations/:id/claim` — claim a location
 
 ---
 
@@ -780,125 +826,110 @@ gs://aura-fitness-media/
 
 ---
 
-## Phase 7: Infrastructure & DevOps
+## Phase 7: Infrastructure & DevOps — COMPLETE
 
-### 7.1 Environment Configuration
+> **Completed:** 2026-03-26
+> **Status:** All infrastructure hardening, CI/CD pipelines, deployment automation, and monitoring setup implemented.
 
-```
-.env.development
-.env.staging
-.env.production
-```
+### 7.1 Environment Configuration — DONE
 
-**Required variables:**
-```
-# Firebase
-FIREBASE_PROJECT_ID=
-FIREBASE_API_KEY=
-FIREBASE_AUTH_DOMAIN=
-FIREBASE_STORAGE_BUCKET=
+**`.env.example` files created** to document required variables for new developer setup:
+- `/.env.example` — Frontend: Gemini API key + 6 Firebase config vars
+- `/server/.env.example` — Backend: Gemini API key, PORT, JOBS_API_KEY, NODE_ENV, CORS_ORIGIN
 
-# Backend
-GEMINI_API_KEY=
-PORT=8080
-NODE_ENV=production
-JOBS_API_KEY=                    # API key for Cloud Scheduler job auth (Phase 3)
+**Production secrets** managed via GCP Secret Manager (not environment variables):
+- `gemini-api-key` — Gemini AI API key
+- `jobs-api-key` — Cloud Scheduler job authentication key
 
-# Push Notifications (handled by Expo Push API — no server-side token needed)
+Secrets are injected into Cloud Run via `--set-secrets` flag in the deploy script.
 
-# Feature Flags
-ENABLE_SOCIAL=true
-ENABLE_COMPETITIONS=true
-```
+### 7.2 Firestore Security Rules — DONE (Phase 1)
 
-### 7.2 Firestore Security Rules
+Security rules were deployed in Phase 1 and cover all collections: users, exercises, sharedLocations, feed, competitions. See `firestore.rules` for the full ruleset.
 
-```javascript
-rules_version = '2';
-service cloud.firestore {
-  match /databases/{database}/documents {
+**Firestore composite indexes:** Not needed. All current queries use single-field filters or filter+orderBy on the same field. The `firestore.indexes.json` remains empty.
 
-    // User data: only owner can read/write
-    match /users/{uid}/{document=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
-    }
+### 7.3 Security Hardening — DONE
 
-    // Exercise library: any authenticated user can read, admin can write
-    match /exercises/{exerciseId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth.token.admin == true;
-    }
+**Helmet middleware** added to `server/index.js`:
+- Sets `X-Content-Type-Options: nosniff`, `Strict-Transport-Security`, `X-Frame-Options`, and other security headers automatically
+- Dependency: `helmet` ^8.0.0
 
-    // Shared locations: authenticated users can read, contributors can write
-    match /sharedLocations/{locationId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth != null
-        && request.auth.uid in resource.data.contributors;
-    }
+**CORS restriction** in `server/index.js`:
+- Configurable via `CORS_ORIGIN` environment variable
+- Development: allows all origins (default when `CORS_ORIGIN` not set)
+- Production: set `CORS_ORIGIN` to restrict (note: mobile app `fetch` calls don't send `Origin` headers like browsers, so this is defense-in-depth)
+- Allowed methods: GET, POST, PUT, DELETE
+- Allowed headers: Content-Type, Authorization, x-jobs-key
 
-    // Social feed: visibility-based access
-    match /feed/{postId} {
-      allow read: if request.auth != null
-        && (resource.data.visibility == 'public'
-            || resource.data.authorUid == request.auth.uid
-            || request.auth.uid in resource.data.visibleTo);
-      allow create: if request.auth != null
-        && request.resource.data.authorUid == request.auth.uid;
-      allow delete: if request.auth != null
-        && resource.data.authorUid == request.auth.uid;
-    }
+**Dependency pinning:**
+- `@google/genai` changed from `"latest"` to `"^1.44.0"` to prevent breaking changes on `npm install`
 
-    // Competitions: authenticated users can read public, participants can update scores
-    match /competitions/{compId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      match /participants/{uid} {
-        allow read: if request.auth != null;
-        allow write: if request.auth != null && request.auth.uid == uid;
-      }
-    }
-  }
-}
-```
+**Dockerfile hardening:**
+- Added `ENV NODE_ENV=production` so Express runs in production mode (less verbose errors, view caching)
 
-### 7.3 Cloud Run Updates
+### 7.4 Cloud Run Deployment — DONE
 
-**Updated `server/Dockerfile`:**
-```dockerfile
-FROM node:20-slim
-WORKDIR /app
+**Deployment script:** `server/deploy.sh`
+- Builds Docker image via Cloud Build
+- Deploys to Cloud Run with production configuration:
+  - Memory: 1GB, CPU: 2
+  - Min instances: 1 (avoids cold starts), Max instances: 10
+  - Secrets injected from Secret Manager: `gemini-api-key`, `jobs-api-key`
+  - Environment: `NODE_ENV=production`, `PORT=8080`
 
-# Install firebase-admin and other new deps
-COPY package*.json ./
-RUN npm ci --omit=dev
+**Prerequisites (one-time GCP setup):**
+1. Create secrets in Secret Manager: `gemini-api-key`, `jobs-api-key`
+2. Grant Cloud Run service account `roles/secretmanager.secretAccessor`
 
-# Copy service account key (injected via Cloud Run secrets)
-COPY . .
+### 7.5 CI/CD Pipelines — DONE
 
-EXPOSE 8080
-ENV PORT=8080
-ENV NODE_ENV=production
+**Backend CI/CD:** `.github/workflows/deploy-backend.yml`
+- Triggers on push to `main` when `server/**` files change, or manual dispatch
+- Uses Workload Identity Federation for keyless GCP auth (no service account keys)
+- Builds Docker image and deploys to Cloud Run
+- GitHub Secrets required: `WIF_PROVIDER`, `WIF_SERVICE_ACCOUNT`
 
-CMD ["node", "index.js"]
-```
+**Mobile builds:** `.github/workflows/build-mobile.yml`
+- Triggers on version tags (`v*`) or manual dispatch
+- Installs dependencies, sets up EAS CLI
+- Runs `eas build --platform all --profile production`
+- GitHub Secret required: `EXPO_TOKEN`
 
-**Cloud Run configuration:**
-- Min instances: 1 (avoid cold starts — required for job endpoints and rate limiter state)
-- Max instances: 10 (scale with users)
-- Memory: 512MB → 1GB (for AI + Firestore operations)
-- CPU: 1 → 2 (for background job processing)
-- Secrets: Firebase service account, Gemini API key, `JOBS_API_KEY`
-- Cloud Scheduler: 3 cron triggers configured (streak-checker daily, progress-analyzer weekly, plan-adjuster every 6h) — each sends HTTP POST to `/api/jobs/{jobName}` with `x-jobs-key` header
+### 7.6 Health Checks — DONE
 
-### 7.4 Monitoring & Observability
+**Liveness probe:** `GET /health` — lightweight, returns `{status: 'ok', timestamp}`
 
-- **Structured logging**: JSON logs with user context (uid, request ID) — **implemented in Phase 3** via `errorHandler.js` and `scheduler.js`. All logs are JSON-formatted with `severity`, `message`, `uid`, `path`, `requestId` fields. Cloud Run auto-parses these into Cloud Logging.
-- **Request tracing**: Every request gets a `requestId` (UUID v4) via `requestIdMiddleware` — included in error responses and logs for request-level correlation.
-- **Job monitoring**: Each job run logs a structured completion summary with `total`, `success`, `failed`, `skipped` counts and per-user error details.
-- **Error tracking**: Integrate Sentry or Cloud Error Reporting (not yet configured)
-- **Performance**: Cloud Run metrics + custom latency tracking per agent
-- **Alerts**: Slack/email alerts for error rate spikes, high latency, job failures
+**Deep health check:** `GET /health/deep` — verifies Firestore connectivity by writing to `_health/ping`. Returns 503 with `{status: 'degraded'}` if Firestore is unreachable.
+
+### 7.7 Monitoring & Observability — DONE
+
+**Already implemented (Phases 1-3):**
+- Structured JSON logging via `errorHandler.js` — auto-parsed by Cloud Run into Cloud Logging
+- Request tracing via `requestIdMiddleware` — UUID v4 per request, included in all error responses and logs
+- Job monitoring via `scheduler.js` — structured completion summaries with per-user error isolation
+
+**Added in Phase 7:**
+- **Cloud Error Reporting opt-in:** Added `@type` field to 5xx error log entries in `errorHandler.js`. Cloud Error Reporting now auto-groups errors with stack traces.
+- **Monitoring setup script:** `server/infra/setup-monitoring.sh` — creates GCP uptime check on `/health` (5-min interval) and documents alert policy setup for:
+  - Health check failure (email immediately)
+  - Cloud Run 5xx rate > 5% over 5 min
+  - Cloud Run p95 latency > 30s over 5 min
+
+### 7.8 Docker & Git Hygiene — DONE
+
+**`server/.dockerignore`** expanded to exclude: scripts/, *.md, .env.*, Dockerfile, .gitignore
+
+**`server/.gitignore`** created to cover: node_modules/, .env, .env.*, npm-debug.log
+
+### Phase 7 Discoveries & Notes
+
+1. **Firestore composite indexes not needed**: All current queries use single-field filters or same-field filter+orderBy. If future queries combine filters on different fields, Firestore will return an error with a direct link to create the needed index.
+2. **Cloud Error Reporting is essentially free**: It automatically parses the structured JSON logs already being emitted. The only change needed was adding the `@type` field to 5xx log entries.
+3. **CORS is defense-in-depth for mobile**: React Native `fetch` calls don't send `Origin` headers the way browsers do, so CORS restrictions are less critical for a mobile-only backend. Still good practice.
+4. **Workload Identity Federation preferred over service account keys**: The CI/CD pipeline uses WIF for keyless GCP authentication, avoiding long-lived credentials in GitHub Secrets.
+5. **Staging environment intentionally omitted**: For a personal app, a single production environment with the deploy script is sufficient. Add staging only if user base grows.
+6. **Secret rotation advisory**: The Gemini API key `AIzaSyBXmN09K7bdEODboFYvgOp2DS_2Of0Uyz8` is in git history from earlier commits. It should be rotated in Google AI Studio. The Firebase API key is a client-side key restricted by security rules and is not a critical secret.
 
 ---
 
@@ -943,8 +974,11 @@ Phase 6: Social Features ──────────────────�
 ```
 
 **Critical path:** Phase 1 → Phase 2 → Phase 3 (each depends on the previous) — **ALL COMPLETE**.
-Phases 4, 5, 6 can begin now and can be developed in parallel.
-Phase 7 (Infrastructure) can be done incrementally alongside any phase.
+Phases 4 and 5 — **COMPLETE**. Exercise data seeded to Firestore, shared locations API operational.
+Phase 7 (Infrastructure) — **COMPLETE**. CI/CD, security hardening, deployment automation, and monitoring all in place.
+Phase 6 (Social Features) is the only remaining phase — can begin immediately.
+
+**Exercise media note:** Images and GIFs are not yet uploaded to Cloud Storage. Placeholder assets exist locally at `/Users/damiengreen/Downloads/exercise_assets (1)/`. The upload pipeline (`server/scripts/generateExerciseMedia.js`) will be used later in development to populate Cloud Storage and update Firestore docs with media URLs.
 
 ---
 
@@ -1029,7 +1063,7 @@ Since there's no current auth system or cloud database, migration is straightfor
 **New files created:**
 | File | Purpose | Status |
 |------|---------|--------|
-| `server/services/firestore.js` | Admin Firestore read/write layer (getUserProfile, getUserActivePlan, getUserSessions, getSessionSets, saveNewPlan, saveInsight, getWorkoutStreak, getAllUserUids) | DONE |
+| `server/services/firestore.js` | Admin Firestore read/write layer — 11 core functions (Phase 3) + 4 exercise functions (Phase 4) + 6 shared location functions (Phase 5) = 21 total | DONE |
 | `server/middleware/errorHandler.js` | AppError class, asyncHandler wrapper, requestIdMiddleware, centralized error handler with structured JSON logging | DONE |
 | `server/middleware/rateLimit.js` | Per-user in-memory sliding window rate limiter (60 req/min general, 20 req/min AI endpoints) | DONE |
 | `server/services/notifications.js` | Expo Push API sender (sendPushNotification, sendBatchNotifications) with DeviceNotRegistered handling | DONE |
@@ -1064,20 +1098,61 @@ Since there's no current auth system or cloud database, migration is straightfor
 9. **Push token stored in Firestore profile**: `users/{uid}/profile/main.pushToken` field. Written by the frontend on auth state change. Read by `notifications.js` when sending pushes. Stale tokens (DeviceNotRegistered) are auto-cleared.
 10. **Deferred to Phase 6**: `competitionScorer.js` and `feedGenerator.js` jobs are not implemented — they depend on social features infrastructure.
 
+### Phase 4 — Completed Files
+
+**New files created:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `server/routes/exercises.js` | Exercise library API (search, filter, detail, alternatives) | DONE |
+| `server/scripts/seedExercises.js` | Exercise data seeder (Firestore `exercises/` from `Exercise_Reference.json`) | DONE |
+| `server/scripts/generateExerciseMedia.js` | Exercise media upload scaffold (deferred — placeholder assets only) | SCAFFOLD |
+| `app/exercises.js` | Exercise browser screen (search, filter, pagination) | DONE |
+| `components/ExerciseDetail.js` | Exercise detail view (instructions, tips, alternatives, media) | DONE |
+| `Docs/Exercise_Reference.json` | Curated exercise library dataset | DONE |
+
+**Modified files:**
+| File | Changes | Status |
+|------|---------|--------|
+| `server/services/firestore.js` | Added getExercises, getExerciseById, getExercisesByNames, getExerciseAlternatives | DONE |
+| `server/index.js` | Mounted `/api/exercises` route | DONE |
+
+### Phase 5 — Completed Files
+
+**New files created:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `server/routes/locations.js` | Shared locations API (CRUD, equipment contributions, proximity search) | DONE |
+| `server/services/geoUtils.js` | Haversine distance calculation utility | DONE |
+
+**Modified files:**
+| File | Changes | Status |
+|------|---------|--------|
+| `server/services/firestore.js` | Added getSharedLocations, getSharedLocationById, createSharedLocation, addEquipmentContribution, reportMissingEquipment, claimSharedLocation | DONE |
+| `server/index.js` | Mounted `/api/locations` route | DONE |
+
+### Phase 7 — Completed Files
+
+**New files created:**
+| File | Purpose | Status |
+|------|---------|--------|
+| `.env.example` | Documents required frontend environment variables | DONE |
+| `server/.env.example` | Documents required backend environment variables | DONE |
+| `server/.gitignore` | Server-specific git ignore rules | DONE |
+| `server/deploy.sh` | Automated Cloud Run deployment with Secret Manager | DONE |
+| `.github/workflows/deploy-backend.yml` | GitHub Actions CI/CD for backend auto-deploy | DONE |
+| `.github/workflows/build-mobile.yml` | GitHub Actions EAS mobile builds on version tags | DONE |
+| `server/infra/setup-monitoring.sh` | GCP uptime check and alert policy setup | DONE |
+
+**Modified files:**
+| File | Changes | Status |
+|------|---------|--------|
+| `server/package.json` | Pinned `@google/genai` to `^1.44.0`, added `helmet` ^8.0.0 | DONE |
+| `server/index.js` | Added helmet middleware, restricted CORS, added `/health/deep` endpoint | DONE |
+| `server/Dockerfile` | Added `ENV NODE_ENV=production` | DONE |
+| `server/middleware/errorHandler.js` | Added `@type` field for Cloud Error Reporting auto-grouping | DONE |
+| `server/.dockerignore` | Expanded exclusions (scripts/, *.md, Dockerfile, etc.) | DONE |
+
 ### Remaining Files (Future Phases)
-
-**Phase 4 — Exercise Library:**
-| File | Purpose |
-|------|---------|
-| `server/routes/exercises.js` | Exercise library API |
-| `server/scripts/seedExercises.js` | Exercise data seeder |
-| `app/exercises.js` | Exercise browser screen |
-
-**Phase 5 — Shared Equipment:**
-| File | Purpose |
-|------|---------|
-| `server/routes/locations.js` | Shared locations API |
-| `app/locations.js` | Update: add shared location discovery |
 
 **Phase 6 — Social Features:**
 | File | Purpose |

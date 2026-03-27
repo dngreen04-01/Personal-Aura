@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 
 const authMiddleware = require('./middleware/auth');
 const { requestIdMiddleware, errorHandler } = require('./middleware/errorHandler');
@@ -17,7 +18,12 @@ const locationsRouter = require('./routes/locations');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+app.use(helmet());
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-jobs-key'],
+}));
 app.use(express.json({ limit: '5mb' }));
 app.use(requestIdMiddleware);
 
@@ -28,6 +34,16 @@ const generalRateLimit = createRateLimit(60, 60000);
 // Public endpoints
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get('/health/deep', async (req, res) => {
+  try {
+    const { getFirestore } = require('./services/firestore');
+    await getFirestore().collection('_health').doc('ping').set({ ts: new Date().toISOString() });
+    res.json({ status: 'ok', firestore: 'ok', timestamp: new Date().toISOString() });
+  } catch (err) {
+    res.status(503).json({ status: 'degraded', firestore: 'error', error: err.message });
+  }
 });
 
 // Job endpoints — API key auth (Cloud Scheduler)

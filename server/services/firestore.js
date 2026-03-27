@@ -223,16 +223,9 @@ async function getExercisesByNames(names) {
 
 async function getExerciseAlternatives(exerciseId) {
   const exercise = await getExerciseById(exerciseId);
-  if (!exercise || !exercise.alternatives || exercise.alternatives.length === 0) {
-    return [];
-  }
-
-  const results = [];
-  for (const slug of exercise.alternatives) {
-    const alt = await getExerciseById(slug);
-    if (alt) results.push(alt);
-  }
-  return results;
+  if (!exercise?.alternatives?.length) return [];
+  // Alternatives are stored as original names; look up by name
+  return getExercisesByNames(exercise.alternatives);
 }
 
 // --- Shared Locations ---

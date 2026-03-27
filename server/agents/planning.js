@@ -83,6 +83,7 @@ Your task: Suggest 3 alternative exercises when the user wants to swap an exerci
 For each alternative, provide a biomechanical description explaining WHY it's a good substitute — mention the target muscles, movement pattern, and any injury/equipment considerations. Mark the single best overall alternative as recommended.
 
 Equipment awareness: Only suggest exercises the user can perform with their available equipment.
+Use exact exercise names from the database. Do not abbreviate or alter exercise names.
 
 You MUST respond with valid JSON matching this exact schema:
 {

@@ -26,7 +26,9 @@ function errorHandler(err, req, res, _next) {
   const retryable = err.retryable || false;
 
   // Structured JSON log for Cloud Run -> Cloud Logging
+  // @type field opts into Cloud Error Reporting automatic grouping for 5xx errors
   const logEntry = {
+    ...(statusCode >= 500 && { '@type': 'type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent' }),
     severity: statusCode >= 500 ? 'ERROR' : 'WARNING',
     message: err.message,
     uid: req.user?.uid || null,
