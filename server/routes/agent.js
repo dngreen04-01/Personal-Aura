@@ -59,10 +59,10 @@ ${greetingContext}
 Guidelines:
 - Reference the time of day naturally
 - If they have an active streak, mention it encouragingly (e.g., "3 days strong!")
-- Briefly reference their last workout's focus
-- Describe today's scheduled workout conversationally (focus, exercise count)
-- Ask if they're ready or want to adjust
-- Be warm, motivating, and concise`;
+- If they have recent progress (PRs, volume increases), mention one highlight briefly
+- Describe today's scheduled workout specifically: name the focus area, exercise count, and estimated duration (assume ~4 min per exercise)
+- Ask if they're ready or want to adjust anything (shorter, different focus, etc.)
+- Be warm, motivating, and concise — no generic filler`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3.1-flash-lite-preview',

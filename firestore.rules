@@ -3,8 +3,12 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // User data: only owner can read/write
-    match /users/{uid}/{document=**} {
+    match /users/{uid} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+
+      match /{document=**} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
     }
 
     // Exercise library: any authenticated user can read, admin can write

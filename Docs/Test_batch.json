@@ -1,0 +1,93 @@
+[  {
+    "id": 1,
+    "name": "Barbell Back Squat",
+    "muscles": {
+      "primary": ["Quadriceps", "Gluteus Maximus"],
+      "secondary": ["Hamstrings", "Core", "Calves", "Lower Back"]
+    },
+    "equipment": ["Barbell", "Squat Rack", "Weight Plates"],
+    "instructions": [
+      "Unrack the barbell so it rests securely across your upper traps or rear delts.",
+      "Step back and set your feet roughly shoulder-width apart, toes pointed slightly outward.",
+      "Brace your core, take a deep breath, and initiate the movement by pushing your hips back and bending your knees.",
+      "Lower yourself until your thighs are at least parallel to the floor.",
+      "Drive through your mid-foot to stand back up to the starting position."
+    ],
+    "tips": "Keep your chest up and a neutral spine throughout the movement. Do not let your knees cave inward as you push up.",
+    "alternatives": ["Dumbbell Goblet Squat", "Leg Press", "Front Squat", "Bodyweight Squat"],
+    "tags": ["LowerBody", "Compound", "Strength", "Barbell"]
+  },
+  {
+    "id": 2,
+    "name": "Standard Push-Up",
+    "muscles": {
+      "primary": ["Pectoralis Major", "Triceps Brachii"],
+      "secondary": ["Anterior Deltoids", "Core"]
+    },
+    "equipment": ["Bodyweight"],
+    "instructions": [
+      "Start in a high plank position with your hands placed slightly wider than shoulder-width apart.",
+      "Keep your body in a straight line from your head to your heels.",
+      "Lower your body by bending your elbows until your chest is just above the floor.",
+      "Push back up to the starting position by fully extending your arms."
+    ],
+    "tips": "Keep your elbows tucked at a 45-degree angle to your body to protect your shoulders. Do not let your lower back sag.",
+    "alternatives": ["Incline Push-Up", "Knee Push-Up", "Dumbbell Bench Press", "Weighted Push-Up"],
+    "tags": ["UpperBody", "Chest", "Bodyweight", "Compound"]
+  },
+  {
+    "id": 3,
+    "name": "Conventional Deadlift",
+    "muscles": {
+      "primary": ["Gluteus Maximus", "Hamstrings", "Erector Spinae"],
+      "secondary": ["Lats", "Traps", "Forearms", "Quadriceps", "Core"]
+    },
+    "equipment": ["Barbell", "Weight Plates"],
+    "instructions": [
+      "Stand with your mid-foot under the barbell, feet hip-width apart.",
+      "Hinge at your hips and grip the bar just outside your knees.",
+      "Drop your hips slightly, lift your chest, and flatten your back.",
+      "Take a deep breath, brace your core, and drive through the floor with your legs to lift the weight.",
+      "Stand tall at the top with your hips fully extended, then hinge at the hips to return the bar to the floor."
+    ],
+    "tips": "Keep the barbell close to your body (dragging up your shins). Avoid rounding your lower back at any point during the lift.",
+    "alternatives": ["Romanian Deadlift (RDL)", "Trap Bar Deadlift", "Dumbbell Deadlift"],
+    "tags": ["FullBody", "PosteriorChain", "Strength", "Barbell"]
+  },
+  {
+    "id": 4,
+    "name": "Pull-Up",
+    "muscles": {
+      "primary": ["Latissimus Dorsi", "Biceps Brachii"],
+      "secondary": ["Rhomboids", "Traps", "Posterior Deltoids", "Core"]
+    },
+    "equipment": ["Pull-Up Bar"],
+    "instructions": [
+      "Grab the pull-up bar with an overhand grip, hands slightly wider than shoulder-width.",
+      "Hang freely with your arms fully extended (dead hang).",
+      "Pull your shoulder blades down and back, then pull your chest up to the bar.",
+      "Pause briefly at the top, then lower yourself slowly and with control back to the starting position."
+    ],
+    "tips": "Focus on driving your elbows down to the floor rather than just pulling with your biceps. Minimize swinging (kipping) to maximize muscle engagement.",
+    "alternatives": ["Chin-Up", "Lat Pulldown", "Assisted Pull-Up Machine", "Inverted Row"],
+    "tags": ["UpperBody", "Back", "Bodyweight", "Pull"]
+  },
+  {
+    "id": 5,
+    "name": "Dumbbell Overhead Press (Seated)",
+    "muscles": {
+      "primary": ["Anterior Deltoids", "Lateral Deltoids"],
+      "secondary": ["Triceps Brachii", "Upper Trapezius"]
+    },
+    "equipment": ["Dumbbells", "Adjustable Bench"],
+    "instructions": [
+      "Sit on a bench with back support, holding a dumbbell in each hand resting on your thighs.",
+      "Kick the dumbbells up to shoulder height, palms facing forward.",
+      "Press the dumbbells overhead until your arms are fully extended.",
+      "Slowly lower the dumbbells back to the starting position at your shoulders."
+    ],
+    "tips": "Keep your core tight and avoid excessively arching your lower back. Don't let the dumbbells clank together at the top.",
+    "alternatives": ["Barbell Overhead Press", "Arnold Press", "Machine Shoulder Press"],
+    "tags": ["UpperBody", "Shoulders", "Dumbbell", "Push"]
+  }
+]

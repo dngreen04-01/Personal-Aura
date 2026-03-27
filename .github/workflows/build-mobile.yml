@@ -26,5 +26,5 @@ jobs:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
-      - name: Build for all platforms
-        run: eas build --platform all --profile production --non-interactive
+      - name: Build for Android
+        run: eas build --platform android --profile production --non-interactive
