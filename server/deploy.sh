@@ -26,7 +26,7 @@ gcloud run deploy "${SERVICE}" \
   --min-instances 1 \
   --max-instances 10 \
   --set-secrets "GEMINI_API_KEY=gemini-api-key:latest,JOBS_API_KEY=jobs-api-key:latest" \
-  --set-env-vars "NODE_ENV=production,PORT=8080"
+  --set-env-vars "NODE_ENV=production"
 
 echo "==> Deployment complete!"
 gcloud run services describe "${SERVICE}" \
