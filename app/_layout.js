@@ -13,6 +13,7 @@ import {
 import * as SplashScreen from 'expo-splash-screen';
 import { colors } from '../lib/theme';
 import { AuthProvider } from '../lib/authContext';
+import { initNotifications } from '../lib/notifications';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -24,6 +25,10 @@ export default function RootLayout() {
     Inter_700Bold,
     Inter_800ExtraBold,
   });
+
+  useEffect(() => {
+    initNotifications();
+  }, []);
 
   const onLayoutRootView = useCallback(async () => {
     if (fontsLoaded) {

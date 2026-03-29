@@ -156,12 +156,17 @@ export default function ChatScreen() {
       // If workoutCard received, update todayWorkout state
       if (data.workoutCard) {
         const wc = data.workoutCard;
-        setTodayWorkout({ focus: wc.focus, exercises: wc.exercises, day: todayWorkout?.day });
+        // Ensure all exercises have a targetWeight (fallback to "0kg" if AI returned null)
+        const exercises = (wc.exercises || []).map(ex => ({
+          ...ex,
+          targetWeight: ex.targetWeight || '0kg',
+        }));
+        setTodayWorkout({ focus: wc.focus, exercises, day: todayWorkout?.day });
 
         // Persist custom/adjusted workouts to plan so they survive round-trips
         if (wc.modificationType === 'adjust' && plan) {
           const updatedPlan = plan.map(day =>
-            day.day === todayWorkout?.day ? { ...day, exercises: wc.exercises, focus: wc.focus } : day
+            day.day === todayWorkout?.day ? { ...day, exercises, focus: wc.focus } : day
           );
           setPlan(updatedPlan);
           await saveWorkoutPlan(updatedPlan);

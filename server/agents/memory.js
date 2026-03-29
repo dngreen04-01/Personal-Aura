@@ -21,6 +21,9 @@ function buildAgentContext(userContext) {
       equipment: ctx.equipment || null,
       experience: ctx.experience || null,
       weightUnit: ctx.weightUnit || 'kg',
+      weightKg: ctx.weightKg || null,
+      gender: ctx.gender || null,
+      age: ctx.age || null,
     },
     workout: {
       day: ctx.currentDay?.focus || ctx.currentDay?.day || null,

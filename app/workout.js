@@ -17,18 +17,7 @@ import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
 
-// Lazy-load expo-notifications (not available in Expo Go SDK 53+)
-let Notifications = null;
-try {
-  Notifications = require('expo-notifications');
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
-} catch {}
+import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAlarm, cancelAll } from '../lib/notifications';
 
 export default function WorkoutScreen() {
   const router = useRouter();
@@ -43,7 +32,6 @@ export default function WorkoutScreen() {
   const [restRemaining, setRestRemaining] = useState(0);
   const restEndTimeRef = useRef(null);
   const pendingAdvanceRef = useRef(null);
-  const restNotifIdRef = useRef(null);
   const [rpe, setRpe] = useState(null);
   const [weightBadge, setWeightBadge] = useState(null);
 
@@ -80,6 +68,7 @@ export default function WorkoutScreen() {
   const [isShareLoading, setIsShareLoading] = useState(false);
   const [libraryExercise, setLibraryExercise] = useState(null);
   const [showExerciseDetail, setShowExerciseDetail] = useState(false);
+  const [isEstimatedWeight, setIsEstimatedWeight] = useState(false);
   const inputRef = useRef(null);
   const weightInputRef = useRef(null);
 
@@ -95,6 +84,7 @@ export default function WorkoutScreen() {
       setIsEditingWeight(false);
       setExerciseImage(null);
       setLibraryExercise(null);
+      setIsEstimatedWeight(false);
 
       // Look up exercise in local library cache
       getCachedExercisesByNames([currentExercise.name])
@@ -135,6 +125,9 @@ export default function WorkoutScreen() {
             }
           } else {
             setWeight(planWeightDisplay);
+            const isFirstTime = progression.weights.length === 0 && planWeightDisplay > 0;
+            const isMarkedEstimated = currentExercise.isEstimated === true;
+            setIsEstimatedWeight(isFirstTime || isMarkedEstimated);
           }
         } catch {
           const planWeightDisplay = weightUnit === 'lbs' ? Math.round(planWeightKg * 2.20462) : planWeightKg;
@@ -144,14 +137,13 @@ export default function WorkoutScreen() {
     }
   }, [currentExIdx]);
 
-  // Start session & request notification permissions
+  // Start session
   useEffect(() => {
     const init = async () => {
       if (day) {
         const id = await startSession(day.day, day.focus, location?.id || null);
         setSessionId(id);
       }
-      if (Notifications) await Notifications.requestPermissionsAsync();
       try {
         const profile = await getUserProfile();
         setUserProfile(profile);
@@ -160,37 +152,12 @@ export default function WorkoutScreen() {
     init();
   }, []);
 
-  // Schedule a local notification for when rest ends
-  const scheduleRestNotification = async (seconds) => {
-    if (!Notifications) return;
-    try {
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Rest Complete',
-          body: 'Time to hit your next set!',
-          sound: true,
-        },
-        trigger: { type: 'timeInterval', seconds, repeats: false },
-      });
-      restNotifIdRef.current = id;
-    } catch {}
-  };
-
-  const cancelRestNotification = async () => {
-    if (restNotifIdRef.current && Notifications) {
-      try {
-        await Notifications.cancelScheduledNotificationAsync(restNotifIdRef.current);
-      } catch {}
-      restNotifIdRef.current = null;
-    }
-  };
-
   // Advance to next set/exercise when rest completes
   const completeRest = useCallback(() => {
     setIsResting(false);
     setRestRemaining(0);
     restEndTimeRef.current = null;
-    cancelRestNotification();
+    fireAlarmNow();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     const advance = pendingAdvanceRef.current;
     pendingAdvanceRef.current = null;
@@ -343,11 +310,14 @@ export default function WorkoutScreen() {
       }
     }
 
+    if (isEstimatedWeight) setIsEstimatedWeight(false);
+
     // Start rest with absolute end timestamp
     restEndTimeRef.current = Date.now() + restDuration * 1000;
     setIsResting(true);
     setRestRemaining(restDuration);
-    scheduleRestNotification(restDuration);
+    showTimerNotification(currentExercise.name, restDuration);
+    scheduleAlarmNotification(restDuration);
 
     // Queue what happens after rest completes
     if (currentSet >= totalSets) {
@@ -383,7 +353,7 @@ export default function WorkoutScreen() {
 
   const handleSkipRest = () => {
     restEndTimeRef.current = null;
-    cancelRestNotification();
+    cancelAll();
     const advance = pendingAdvanceRef.current;
     pendingAdvanceRef.current = null;
     setIsResting(false);
@@ -528,6 +498,24 @@ export default function WorkoutScreen() {
                 </View>
                 <TouchableOpacity onPress={() => setPushSuggestion(null)} hitSlop={8}>
                   <MaterialIcons name="close" size={16} color="rgba(212,255,0,0.4)" />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* Estimated Weight Banner */}
+            {isEstimatedWeight && (
+              <View style={styles.estimateBanner}>
+                <View style={styles.estimateBannerIcon}>
+                  <MaterialIcons name="auto-awesome" size={16} color={colors.bgDark} />
+                </View>
+                <View style={styles.estimateBannerContent}>
+                  <Text style={styles.estimateBannerTitle}>ESTIMATED WEIGHT</Text>
+                  <Text style={styles.estimateBannerText}>
+                    Based on your strength profile. Adjust as needed.
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setIsEstimatedWeight(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={16} color="rgba(251,191,36,0.4)" />
                 </TouchableOpacity>
               </View>
             )}
@@ -1128,6 +1116,27 @@ const styles = StyleSheet.create({
   },
   pushBannerText: {
     fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(34,197,94,0.85)',
+    lineHeight: 18,
+  },
+
+  // Estimated weight banner
+  estimateBanner: {
+    width: '100%', maxWidth: 340, flexDirection: 'row', alignItems: 'flex-start',
+    padding: spacing.md, borderRadius: radius.lg,
+    backgroundColor: 'rgba(251,191,36,0.08)', borderWidth: 1, borderColor: 'rgba(251,191,36,0.2)',
+    gap: spacing.sm,
+  },
+  estimateBannerIcon: {
+    width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgb(251,191,36)',
+    justifyContent: 'center', alignItems: 'center', marginTop: 2,
+  },
+  estimateBannerContent: { flex: 1 },
+  estimateBannerTitle: {
+    fontSize: 10, fontFamily: 'Inter_800ExtraBold', color: 'rgb(251,191,36)',
+    letterSpacing: 2, marginBottom: 4,
+  },
+  estimateBannerText: {
+    fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(251,191,36,0.85)',
     lineHeight: 18,
   },
 

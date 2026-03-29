@@ -34,7 +34,7 @@
       [
         "expo-notifications",
         {
-          "sounds": []
+          "sounds": ["./assets/sounds/alarm.wav"]
         }
       ]
     ],

@@ -186,18 +186,34 @@ async function handleMessage({ message, history, userContext }) {
       textResponse = toolResult.text;
     } else if (call.name === 'modify_workout') {
       const { handleWorkoutModification } = require('./planning');
-      const modResult = await handleWorkoutModification(call.args, agentContext);
+      try {
+        const modResult = await Promise.race([
+          handleWorkoutModification(call.args, agentContext),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Workout modification timed out')), 20000)),
+        ]);
 
-      const toolResult = await chat.sendMessage({
-        message: [{
-          functionResponse: {
-            name: 'modify_workout',
-            response: { status: 'success', ...modResult.workoutCard },
-          },
-        }],
-      });
-      textResponse = toolResult.text;
-      workoutCardData = modResult.workoutCard;
+        const toolResult = await chat.sendMessage({
+          message: [{
+            functionResponse: {
+              name: 'modify_workout',
+              response: { status: 'success', ...modResult.workoutCard },
+            },
+          }],
+        });
+        textResponse = toolResult.text;
+        workoutCardData = modResult.workoutCard;
+      } catch (modErr) {
+        console.error('modify_workout in orchestrator timed out:', modErr.message);
+        const toolResult = await chat.sendMessage({
+          message: [{
+            functionResponse: {
+              name: 'modify_workout',
+              response: { status: 'error', error: 'Workout generation took too long. Ask the user to try again.' },
+            },
+          }],
+        });
+        textResponse = toolResult.text;
+      }
     }
   }
 

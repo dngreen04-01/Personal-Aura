@@ -200,6 +200,12 @@ async function handleWorkoutModification(argsOrMessage, agentContext) {
   const contextBlock = agentContext.workout ?
     `Current workout: ${agentContext.workout.day || 'General'}\nExercises: ${JSON.stringify(currentExercises)}` : '';
 
+  const userStats = [
+    agentContext.user?.weightKg ? `User weighs ${agentContext.user.weightKg}kg` : null,
+    agentContext.user?.gender ? `Gender: ${agentContext.user.gender}` : null,
+    agentContext.user?.age ? `Age: ${agentContext.user.age}` : null,
+  ].filter(Boolean).join(', ');
+
   const systemPrompt = `${BASE_IDENTITY}
 
 Your task: ${modificationType === 'replace'
@@ -208,16 +214,25 @@ Your task: ${modificationType === 'replace'
 
 User's equipment: ${agentContext.user?.equipment || 'full gym'}
 User's goal: ${agentContext.user?.goal || 'general fitness'}
+${userStats ? `User stats: ${userStats}` : ''}
 ${contextBlock}
 
 User's request: ${instructions}
+
+Weight Estimation Rules:
+- Every exercise MUST have a specific numeric targetWeight in kg (e.g. "40kg"). Never use null or omit it.
+- For compound barbell exercises: estimate based on body weight ratios and the user's goal.
+- For isolation/dumbbell/cable exercises: estimate conservatively (start lighter).
+- For bodyweight exercises (push-ups, pull-ups, etc.): use "0kg".
+- Round to nearest 2.5kg for barbell, nearest 1kg for dumbbell/cable.
+- All weights are estimates — set "isEstimated": true on every exercise.
 
 You MUST respond with valid JSON matching this exact schema:
 {
   "text": "Brief confirmation message (1-2 sentences)",
   "workoutCard": {
     "focus": "Updated focus label",
-    "exercises": [{ "name": "Exercise Name", "sets": 3, "reps": "8-10", "targetWeight": null, "restSeconds": 90 }],
+    "exercises": [{ "name": "Exercise Name", "sets": 3, "reps": "8-10", "targetWeight": "40kg", "isEstimated": true, "restSeconds": 90 }],
     "estimatedDuration": 45,
     "modificationType": "${modificationType}"
   }
@@ -267,6 +282,11 @@ ${PROGRESSIVE_OVERLOAD_RULES}
 - Volume Adjustment: If user consistently completes all sets with low RPE, consider adding a set. If failing sets, reduce.
 - Schedule Respect: Keep the same number of training days and time constraints.
 - Weight Specificity: Every exercise in the updated plan MUST have a specific numeric targetWeight. Use the workout history to calculate appropriate weights — never leave weights vague.
+- Strength Transfer: For exercises the user has NOT performed yet (not in workout history), estimate appropriate weights based on:
+  1. Their performance on similar exercises (same muscle group, similar movement pattern)
+  2. Standard strength ratios (e.g., incline press ≈ 85-90% of flat bench, leg curl ≈ 50% of squat)
+  3. Body weight and gender for reference
+  Mark these estimated exercises with "isEstimated": true so the frontend can indicate they are estimates. Exercises with history-based weights should NOT have this flag.
 
 You MUST respond with valid JSON matching this exact schema:
 {
@@ -275,7 +295,8 @@ You MUST respond with valid JSON matching this exact schema:
       "day": "Monday",
       "focus": "Push (Chest, Shoulders, Triceps)",
       "exercises": [
-        { "name": "Bench Press", "sets": 3, "reps": "8-10", "targetWeight": "82.5kg", "restSeconds": 90 }
+        { "name": "Bench Press", "sets": 3, "reps": "8-10", "targetWeight": "82.5kg", "restSeconds": 90 },
+        { "name": "Incline Dumbbell Press", "sets": 3, "reps": "10-12", "targetWeight": "30kg", "isEstimated": true, "restSeconds": 90 }
       ]
     }
   ],

@@ -20,8 +20,8 @@ function withTimeout(promise, ms, label) {
 // Per-agent timeout budgets (ms)
 const TIMEOUTS = {
   memory: 2000,
-  orchestrator: 25000,  // generous for function-calling round-trips
-  planning: 30000,      // Pro model needs more time for structured JSON
+  orchestrator: 30000,  // generous for function-calling round-trips
+  planning: 45000,      // Pro model needs more time for structured JSON + weight estimation
   visual: 30000,
   motivation: 500,
 };
