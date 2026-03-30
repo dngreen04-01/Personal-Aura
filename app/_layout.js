@@ -14,7 +14,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { colors } from '../lib/theme';
 import { AuthProvider } from '../lib/authContext';
 import { initNotifications, notifee, EventType, ACTION_BEGIN_SET, ACTION_EXTEND_15S } from '../lib/notifications';
-import { clearRestTimer, saveRestTimer, getActiveRestTimer } from '../lib/database';
+import { clearRestTimer, saveRestTimer, getActiveRestTimer, getDatabase, getPersistedUid } from '../lib/database';
 import { configureGoogleSignIn } from '../lib/auth';
 
 SplashScreen.preventAutoHideAsync();
@@ -23,6 +23,12 @@ SplashScreen.preventAutoHideAsync();
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (type !== EventType.ACTION_PRESS) return;
   const actionId = detail?.pressAction?.id;
+
+  // After app kill, module-level DB state is gone.
+  // Restore correct user-scoped database from persisted UID.
+  const uid = await getPersistedUid();
+  if (!uid) return;
+  await getDatabase(uid);
 
   if (actionId === ACTION_BEGIN_SET) {
     await clearRestTimer().catch(() => {});
