@@ -62,6 +62,7 @@ function buildAgentContext(userContext) {
       streakData: ctx.streakData || null,
       completedSessions: ctx.completedSessions || null,
     },
+    trainingHistory: ctx.trainingContext || null,
   };
 }
 
@@ -146,4 +147,44 @@ function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWork
   return parts.length > 0 ? `User Context:\n${parts.join('\n')}` : '';
 }
 
-module.exports = { buildAgentContext, formatContextBlock, formatCompletionDirective, buildGreetingContext };
+/**
+ * Format training history into a text block for AI system prompts.
+ * Produces a compact summary of what was trained in the last 7 days.
+ */
+function formatTrainingHistory(agentContext) {
+  const history = agentContext.trainingHistory;
+  if (!history || !history.recentSessions || history.recentSessions.length === 0) {
+    return '';
+  }
+
+  const parts = ['\nRecent Training History (Last 7 Days):'];
+
+  for (const session of history.recentSessions) {
+    const type = session.isPlanned ? 'Planned' : 'Ad-hoc';
+    const muscles = session.muscleGroups.length > 0 ? ` [${session.muscleGroups.join(', ')}]` : '';
+    parts.push(`- ${session.date}: ${session.focus} (${type}) — ${session.exercises.join(', ')}${muscles}`);
+  }
+
+  // Muscle group recency
+  if (history.muscleGroupLastTrained && Object.keys(history.muscleGroupLastTrained).length > 0) {
+    parts.push('\nMuscle Group Recency:');
+    const today = new Date().toISOString().split('T')[0];
+    for (const [muscle, lastDate] of Object.entries(history.muscleGroupLastTrained)) {
+      const daysSince = Math.round((new Date(today) - new Date(lastDate)) / (1000 * 60 * 60 * 24));
+      parts.push(`- ${muscle}: ${daysSince === 0 ? 'today' : daysSince === 1 ? 'yesterday' : daysSince + ' days ago'}`);
+    }
+  }
+
+  // Exercise weights for smart estimation
+  if (history.exerciseWeights && Object.keys(history.exerciseWeights).length > 0) {
+    parts.push('\nRecent Exercise Weights:');
+    for (const [name, data] of Object.entries(history.exerciseWeights)) {
+      const rpeNote = data.avgRpe ? ` (avg RPE ${data.avgRpe})` : '';
+      parts.push(`- ${name}: ${data.lastWeight}${data.lastUnit} x${data.lastReps}${rpeNote}`);
+    }
+  }
+
+  return parts.join('\n');
+}
+
+module.exports = { buildAgentContext, formatContextBlock, formatCompletionDirective, buildGreetingContext, formatTrainingHistory };

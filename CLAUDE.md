@@ -52,7 +52,8 @@ npx jest --watch      # Watch mode
 
 ### Shared Libraries (`lib/`)
 
-- **`lib/database.js`** — SQLite schema, migrations, all CRUD operations. Tables: `user_profile`, `workout_plans`, `workout_sessions`, `workout_sets`, `exercise_unit_preferences`, `agent_interactions`, `rest_timers`
+- **`lib/database.js`** — SQLite schema, migrations, all CRUD operations. Tables: `user_profile`, `workout_plans`, `workout_sessions`, `workout_sets`, `exercise_unit_preferences`, `agent_interactions`, `rest_timers`. Includes `getTrainingContext(days)` for 7-day training history with muscle groups and exercise weights.
+- **`lib/contextBuilder.js`** — Unified `buildUserContext()` builder. Accepts profile, workout, exercise, progression, location, motivation, and trainingContext. Output is backward-compatible with server's `buildAgentContext()`.
 - **`lib/auth.js`** — Firebase auth: Google Sign-In, Apple Sign-In, email/password, token management
 - **`lib/notifications.js`** — Notification system: persistent rest timer countdown, alarm sound, action buttons (Begin Set, +15s)
 - **`lib/api.js`** — HTTP client with auto-detection of dev (localhost:3001) vs production (Cloud Run URL)
@@ -68,6 +69,7 @@ npx jest --watch      # Watch mode
 - **Navigation params**: Serialized as JSON strings via `useRouter().push()`.
 - **Rest timer**: Stores end timestamp in SQLite for persistence across app kills. Polls at 250ms intervals. On completion, shows Begin Set modal with alarm sound instead of auto-advancing. Supports +15s extend from notification action buttons.
 - **Weight units**: Per-exercise preference stored in SQLite. All internal aggregations normalize to kg.
+- **Training context**: `getTrainingContext(7)` fetched via `Promise.allSettled` on chat screens. Passes recent sessions, muscle group recency, and exercise weight history to AI agents. Gracefully degrades to null if unavailable. Planning Agent uses this for 48-hour muscle avoidance and smart weight estimation.
 
 ### AI Integration (Multi-Agent Architecture)
 
@@ -82,3 +84,21 @@ npx jest --watch      # Watch mode
 - **Mobile**: Expo EAS builds
 - **API**: Docker → Google Cloud Run (`server/Dockerfile`)
 - **Production API**: `https://aura-api-177339568703.us-central1.run.app`
+
+## Skill routing
+
+When the user's request matches an available skill, ALWAYS invoke it using the Skill
+tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
+The skill has specialized workflows that produce better results than ad-hoc answers.
+
+Key routing rules:
+- Product ideas, "is this worth building", brainstorming → invoke office-hours
+- Bugs, errors, "why is this broken", 500 errors → invoke investigate
+- Ship, deploy, push, create PR → invoke ship
+- QA, test the site, find bugs → invoke qa
+- Code review, check my diff → invoke review
+- Update docs after shipping → invoke document-release
+- Weekly retro → invoke retro
+- Design system, brand → invoke design-consultation
+- Visual audit, design polish → invoke design-review
+- Architecture review → invoke plan-eng-review

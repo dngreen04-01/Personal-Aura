@@ -8,7 +8,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../../lib/theme';
 import { sendAgentMessage, submitPlanRegeneration, greetUser } from '../../lib/api';
-import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation, getGreetingData, getRecentProgressSummary } from '../../lib/database';
+import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation, getGreetingData, getRecentProgressSummary, getTrainingContext } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
 import { buildGreetingCacheKey, getCachedGreeting, cacheGreeting } from '../../lib/greetingCache';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
@@ -132,14 +132,16 @@ export default function ChatScreen() {
         parts: [{ text: m.text }],
       }));
 
-      // Fetch progression data for current exercise to pass to coach
+      // Fetch progression data and training history in parallel
       const currentExName = todayWorkout?.exercises?.[0]?.name || null;
       let progression = null;
-      if (currentExName) {
-        try {
-          progression = await getExerciseProgressionData(currentExName);
-        } catch {}
-      }
+      let trainingCtx = null;
+      const [progressionResult, trainingResult] = await Promise.allSettled([
+        currentExName ? getExerciseProgressionData(currentExName) : Promise.resolve(null),
+        getTrainingContext(7),
+      ]);
+      if (progressionResult.status === 'fulfilled') progression = progressionResult.value;
+      if (trainingResult.status === 'fulfilled') trainingCtx = trainingResult.value;
 
       const userContext = buildUserContext({
         profile: userProfile,
@@ -147,6 +149,7 @@ export default function ChatScreen() {
         exercise: { name: currentExName },
         progression,
         location: selectedLocation,
+        trainingContext: trainingCtx,
       });
 
       const data = await sendAgentMessage(text, history, userContext);
