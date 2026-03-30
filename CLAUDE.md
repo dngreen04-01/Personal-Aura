@@ -69,13 +69,13 @@ npx jest --watch      # Watch mode
 - **Rest timer**: Stores end timestamp in SQLite for persistence across app kills. Polls at 250ms intervals. On completion, shows Begin Set modal with alarm sound instead of auto-advancing. Supports +15s extend from notification action buttons.
 - **Weight units**: Per-exercise preference stored in SQLite. All internal aggregations normalize to kg.
 
-### AI Integration (Dual-Model Strategy)
+### AI Integration (Multi-Agent Architecture)
 
 | Model | Use | Latency |
 |-------|-----|---------|
-| Gemini Flash-Lite | Real-time coach chat with function calling | ~1-2s |
-| Gemini 2.5 Flash | Onboarding plan generation | ~5-10s |
-| Gemini Pro (batch) | Async plan regeneration after 7+ sessions | Background |
+| `gemini-3.1-flash-lite-preview` | Orchestrator, coaching chat, onboarding, greeting, progress insights | ~1-2s |
+| `gemini-3.1-pro-preview` | Planning Agent: workout generation, modification, progressive overload | ~5-10s |
+| `gemini-3.1-flash-image-preview` | Visual Agent: exercise instructional images and animated GIFs | ~3-5s |
 
 ### Deployment
 
