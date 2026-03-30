@@ -10,6 +10,7 @@ import { colors, spacing, radius } from '../../lib/theme';
 import { sendAgentMessage, submitPlanRegeneration, greetUser } from '../../lib/api';
 import { getLatestPlan, getUserProfile, getCompletedSessionCount, getRecentWorkoutHistory, saveWorkoutPlan, getExerciseProgressionData, getLocations, getDefaultLocation, getGreetingData, getRecentProgressSummary } from '../../lib/database';
 import { buildUserContext } from '../../lib/contextBuilder';
+import { buildGreetingCacheKey, getCachedGreeting, cacheGreeting } from '../../lib/greetingCache';
 import SwapExerciseWidget from '../../components/SwapExerciseWidget';
 import ImageMessage from '../../components/ImageMessage';
 import InlineWorkoutCard from '../../components/InlineWorkoutCard';
@@ -75,26 +76,34 @@ export default function ChatScreen() {
           const firstWorkout = savedPlan.find(d => !d.focus.toLowerCase().includes('rest'));
           setTodayWorkout(firstWorkout);
 
-          // AI greeting instead of static messages
-          try {
-            const progressSummary = await getRecentProgressSummary();
-            const greeting = await greetUser({
-              goal: profile?.goal,
-              equipment: profile?.equipment,
-              streak: greetingData.streak,
-              sessionCount: greetingData.sessionCount,
-              lastWorkoutFocus: greetingData.lastWorkoutFocus,
-              lastWorkoutDate: greetingData.lastWorkoutDate,
-              todayFocus: firstWorkout?.focus,
-              todayExerciseCount: firstWorkout?.exercises?.length,
-              progressSummary,
-            });
-            setMessages([{ role: 'model', text: greeting.text }]);
-          } catch {
-            // Fallback to static greeting
-            setMessages([
-              { role: 'model', text: `Ready for today's session? We're focusing on **${firstWorkout?.focus || 'your workout'}**.` },
-            ]);
+          // AI greeting with cache — instant on repeat opens
+          const greetingContext = {
+            goal: profile?.goal,
+            equipment: profile?.equipment,
+            streak: greetingData.streak,
+            sessionCount: greetingData.sessionCount,
+            lastWorkoutFocus: greetingData.lastWorkoutFocus,
+            lastWorkoutDate: greetingData.lastWorkoutDate,
+            todayFocus: firstWorkout?.focus,
+            todayExerciseCount: firstWorkout?.exercises?.length,
+          };
+
+          const cacheKey = buildGreetingCacheKey(greetingContext);
+          const cached = await getCachedGreeting(cacheKey);
+
+          if (cached) {
+            setMessages([{ role: 'model', text: cached.text }]);
+          } else {
+            try {
+              const progressSummary = await getRecentProgressSummary();
+              const greeting = await greetUser({ ...greetingContext, progressSummary });
+              setMessages([{ role: 'model', text: greeting.text }]);
+              cacheGreeting(cacheKey, greeting.text);
+            } catch {
+              setMessages([
+                { role: 'model', text: `Ready for today's session? We're focusing on **${firstWorkout?.focus || 'your workout'}**.` },
+              ]);
+            }
           }
         }
       } else if (!params.selectedDayJson) {
