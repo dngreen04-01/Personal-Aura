@@ -10,14 +10,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames, saveRestTimer, clearRestTimer, getActiveRestTimer } from '../lib/database';
 import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import ExerciseDetail from '../components/ExerciseDetail';
+import BeginSetModal from '../components/BeginSetModal';
 import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
 
-import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAlarm, cancelAll } from '../lib/notifications';
+import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAlarm, cancelAll, notifee, EventType, ACTION_BEGIN_SET, ACTION_EXTEND_15S } from '../lib/notifications';
 
 export default function WorkoutScreen() {
   const router = useRouter();
@@ -69,6 +70,9 @@ export default function WorkoutScreen() {
   const [libraryExercise, setLibraryExercise] = useState(null);
   const [showExerciseDetail, setShowExerciseDetail] = useState(false);
   const [isEstimatedWeight, setIsEstimatedWeight] = useState(false);
+  const [alarmFired, setAlarmFired] = useState(false);
+  const restIdRef = useRef(null);
+  const alarmSoundCapRef = useRef(null);
   const inputRef = useRef(null);
   const weightInputRef = useRef(null);
 
@@ -137,7 +141,7 @@ export default function WorkoutScreen() {
     }
   }, [currentExIdx]);
 
-  // Start session
+  // Start session and check for timer recovery
   useEffect(() => {
     const init = async () => {
       if (day) {
@@ -148,21 +152,79 @@ export default function WorkoutScreen() {
         const profile = await getUserProfile();
         setUserProfile(profile);
       } catch {}
+
+      // Check for active rest timer (app-kill recovery)
+      try {
+        const saved = await getActiveRestTimer();
+        if (saved) {
+          const remaining = Math.max(0, Math.ceil((saved.rest_end_time - Date.now()) / 1000));
+          restIdRef.current = saved.rest_id;
+          if (remaining > 0) {
+            // Timer still running — resume countdown
+            restEndTimeRef.current = saved.rest_end_time;
+            setIsResting(true);
+            setRestRemaining(remaining);
+            showTimerNotification(saved.exercise_name || 'Rest', remaining, saved.rest_id);
+            scheduleAlarmNotification(remaining, saved.rest_id);
+          } else {
+            // Timer expired while app was killed — show Begin Set modal
+            setAlarmFired(true);
+            fireAlarmNow(saved.rest_id);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            alarmSoundCapRef.current = setTimeout(() => stopAlarm(), 300000);
+          }
+        }
+      } catch {}
     };
     init();
+    return () => {
+      // Cleanup alarm sound cap on unmount
+      if (alarmSoundCapRef.current) clearTimeout(alarmSoundCapRef.current);
+      cancelAll();
+    };
   }, []);
 
-  // Advance to next set/exercise when rest completes
+  // Rest complete: show Begin Set modal instead of auto-advancing
   const completeRest = useCallback(() => {
     setIsResting(false);
     setRestRemaining(0);
     restEndTimeRef.current = null;
-    fireAlarmNow();
+    setAlarmFired(true);
+    fireAlarmNow(restIdRef.current);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    // 5-minute alarm sound cap (foreground safety net)
+    alarmSoundCapRef.current = setTimeout(() => stopAlarm(), 300000);
+    // Timer completed — clear persistence (Begin Set handles the advance)
+    clearRestTimer().catch(() => {});
+    // pendingAdvanceRef is preserved — consumed when user taps Begin Set
+  }, []);
+
+  // User taps "Begin Set" on the modal
+  const handleBeginSet = useCallback(() => {
+    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
+    stopAlarm();
+    cancelAll();
+    clearRestTimer().catch(() => {});
+    setAlarmFired(false);
     const advance = pendingAdvanceRef.current;
     pendingAdvanceRef.current = null;
     if (advance) advance();
   }, []);
+
+  // User taps "+15 seconds" on the modal
+  const handleExtendRest = useCallback(() => {
+    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
+    stopAlarm();
+    cancelAll();
+    setAlarmFired(false);
+    restEndTimeRef.current = Date.now() + 15000;
+    setIsResting(true);
+    setRestRemaining(15);
+    showTimerNotification(currentExercise?.name || 'Rest', 15, restIdRef.current);
+    scheduleAlarmNotification(15, restIdRef.current);
+    // Update persisted timer with extended time
+    saveRestTimer(restEndTimeRef.current, sessionId, currentExercise?.name || '', currentSet, totalSets, currentExIdx, exercises.length, restIdRef.current).catch(() => {});
+  }, [currentExercise, sessionId, currentSet, totalSets, currentExIdx, exercises.length]);
 
   // Rest timer - uses end timestamp so it survives backgrounding
   useEffect(() => {
@@ -181,18 +243,43 @@ export default function WorkoutScreen() {
   // Recalculate rest timer when app returns to foreground
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active' && restEndTimeRef.current) {
-        const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
-        if (remaining <= 0) {
-          completeRest();
-        } else {
-          setRestRemaining(remaining);
-          setIsResting(true);
+      if (nextState === 'active') {
+        // If alarm already fired, ensure modal is visible and dismiss notification
+        if (alarmFired) {
+          cancelAll();
+          return;
+        }
+        if (restEndTimeRef.current) {
+          const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
+          if (remaining <= 0) {
+            completeRest();
+          } else {
+            setRestRemaining(remaining);
+            setIsResting(true);
+          }
         }
       }
     });
     return () => sub.remove();
-  }, [completeRest]);
+  }, [completeRest, alarmFired]);
+
+  // Handle Notifee notification action button taps (foreground)
+  useEffect(() => {
+    const unsub = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type !== EventType.ACTION_PRESS && type !== EventType.PRESS) return;
+      const actionId = detail?.pressAction?.id;
+      const notifRestId = detail?.notification?.data?.restId;
+      // Guard against stale notification taps from a previous rest
+      if (notifRestId && restIdRef.current && String(notifRestId) !== String(restIdRef.current)) return;
+
+      if (actionId === ACTION_BEGIN_SET || (type === EventType.PRESS && alarmFired)) {
+        handleBeginSet();
+      } else if (actionId === ACTION_EXTEND_15S) {
+        handleExtendRest();
+      }
+    });
+    return unsub;
+  }, [handleBeginSet, handleExtendRest, alarmFired]);
 
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60);
@@ -313,11 +400,14 @@ export default function WorkoutScreen() {
     if (isEstimatedWeight) setIsEstimatedWeight(false);
 
     // Start rest with absolute end timestamp
-    restEndTimeRef.current = Date.now() + restDuration * 1000;
+    restIdRef.current = Date.now();
+    restEndTimeRef.current = restIdRef.current + restDuration * 1000;
     setIsResting(true);
     setRestRemaining(restDuration);
-    showTimerNotification(currentExercise.name, restDuration);
-    scheduleAlarmNotification(restDuration);
+    showTimerNotification(currentExercise.name, restDuration, restIdRef.current);
+    scheduleAlarmNotification(restDuration, restIdRef.current);
+    // Persist for app-kill recovery
+    saveRestTimer(restEndTimeRef.current, sessionId, currentExercise.name, currentSet, totalSets, currentExIdx, exercises.length, restIdRef.current).catch(() => {});
 
     // Queue what happens after rest completes
     if (currentSet >= totalSets) {
@@ -352,8 +442,11 @@ export default function WorkoutScreen() {
   };
 
   const handleSkipRest = () => {
+    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
     restEndTimeRef.current = null;
     cancelAll();
+    clearRestTimer().catch(() => {});
+    setAlarmFired(false);
     const advance = pendingAdvanceRef.current;
     pendingAdvanceRef.current = null;
     setIsResting(false);
@@ -367,7 +460,10 @@ export default function WorkoutScreen() {
   };
 
   const handleClose = async () => {
-    if (sessionId) await endSession(sessionId);
+    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
+    cancelAll();
+    clearRestTimer().catch(() => {});
+    if (sessionId && !showComplete) await endSession(sessionId);
     router.back();
   };
 
@@ -842,6 +938,17 @@ export default function WorkoutScreen() {
         exercise={libraryExercise}
         visible={showExerciseDetail}
         onClose={() => setShowExerciseDetail(false)}
+      />
+
+      {/* Begin Set Modal (alarm dismiss) */}
+      <BeginSetModal
+        visible={alarmFired}
+        exerciseName={currentExercise?.name || ''}
+        setNumber={currentSet}
+        totalSets={totalSets}
+        isLastSet={currentSet >= totalSets && currentExIdx >= exercises.length - 1}
+        onBeginSet={handleBeginSet}
+        onExtend={handleExtendRest}
       />
     </SafeAreaView>
   );

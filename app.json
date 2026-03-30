@@ -34,9 +34,14 @@
       [
         "expo-notifications",
         {
-          "sounds": ["./assets/sounds/alarm.wav"]
+          "sounds": [
+            "./assets/sounds/alarm.wav"
+          ]
         }
-      ]
+      ],
+      "@react-native-google-signin/google-signin",
+      "expo-apple-authentication",
+      "expo-crypto"
     ],
     "extra": {
       "router": {},

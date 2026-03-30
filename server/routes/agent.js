@@ -60,7 +60,7 @@ Guidelines:
 - Reference the time of day naturally
 - If they have an active streak, mention it encouragingly (e.g., "3 days strong!")
 - If they have recent progress (PRs, volume increases), mention one highlight briefly
-- Describe today's scheduled workout specifically: name the focus area, exercise count, and estimated duration (assume ~4 min per exercise)
+- Describe today's scheduled workout specifically: name the focus area, exercise count, and estimated duration (assume ~8 min per exercise including rest periods)
 - Ask if they're ready or want to adjust anything (shorter, different focus, etc.)
 - Be warm, motivating, and concise — no generic filler`;
 

@@ -24,16 +24,21 @@ npm run server
 npx expo start -c
 ```
 
-No test runner or linter is currently configured.
+```bash
+# Run tests
+npx jest              # All tests
+npx jest --watch      # Watch mode
+```
 
 ## Architecture
 
 ### Frontend (Expo Router, file-based routing)
 
-- **`app/_layout.js`** — Root layout: font loading, splash screen, navigation container
+- **`app/_layout.js`** — Root layout: font loading, splash screen, Google Sign-In config, background notification handlers
+- **`app/auth.js`** — Auth screen: email/password, Google Sign-In, Apple Sign-In (disabled), password reset
 - **`app/index.js`** — Entry redirect: checks onboarding status in SQLite, routes to onboarding or tabs
 - **`app/onboarding.js`** — Multi-step onboarding: goal, equipment, strength baselines, plan generation
-- **`app/workout.js`** — Active workout screen: set logging, rest timer, AI chat, exercise swaps
+- **`app/workout.js`** — Active workout screen: set logging, persistent rest timer, Begin Set modal, AI chat, exercise swaps
 - **`app/workout-summary.js`** — Pre-workout review: exercise list with swap widget
 - **`app/(tabs)/`** — Tab navigation: Chat (`index.js`), Progress (`progress.js`), Profile (`profile.js`)
 
@@ -47,7 +52,9 @@ No test runner or linter is currently configured.
 
 ### Shared Libraries (`lib/`)
 
-- **`lib/database.js`** — SQLite schema, migrations, all CRUD operations. Tables: `user_profile`, `workout_plans`, `workout_sessions`, `workout_sets`, `exercise_unit_preferences`
+- **`lib/database.js`** — SQLite schema, migrations, all CRUD operations. Tables: `user_profile`, `workout_plans`, `workout_sessions`, `workout_sets`, `exercise_unit_preferences`, `agent_interactions`, `rest_timers`
+- **`lib/auth.js`** — Firebase auth: Google Sign-In, Apple Sign-In, email/password, token management
+- **`lib/notifications.js`** — Notification system: persistent rest timer countdown, alarm sound, action buttons (Begin Set, +15s)
 - **`lib/api.js`** — HTTP client with auto-detection of dev (localhost:3001) vs production (Cloud Run URL)
 - **`lib/theme.js`** — Design tokens: colors (primary: `#d4ff00`), spacing scale, border radii, font definitions
 - **`lib/weightUtils.js`** — kg/lbs conversion utilities
@@ -59,7 +66,7 @@ No test runner or linter is currently configured.
 - **API calls**: Raw `fetch()` with 90-second abort timeout. Environment-aware base URL in `lib/api.js`.
 - **Database migrations**: `ALTER TABLE` checks in `initDatabase()` — new columns added via try/catch to handle existing schemas.
 - **Navigation params**: Serialized as JSON strings via `useRouter().push()`.
-- **Rest timer**: Stores end timestamp (not duration) so it survives app backgrounding; polls at 250ms intervals.
+- **Rest timer**: Stores end timestamp in SQLite for persistence across app kills. Polls at 250ms intervals. On completion, shows Begin Set modal with alarm sound instead of auto-advancing. Supports +15s extend from notification action buttons.
 - **Weight units**: Per-exercise preference stored in SQLite. All internal aggregations normalize to kg.
 
 ### AI Integration (Dual-Model Strategy)

@@ -129,7 +129,7 @@ function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWork
     parts.push(`Last workout: ${lastWorkoutFocus}${lastDate}`);
   }
   if (todayFocus) {
-    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises (~${todayExerciseCount * 4} min)` : '';
+    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises (~${todayExerciseCount * 8} min)` : '';
     parts.push(`Today's scheduled workout: ${todayFocus}${exerciseInfo}`);
   }
   if (progressSummary) {
