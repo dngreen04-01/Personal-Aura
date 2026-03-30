@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "177339568703",
+    "project_id": "aura-fitness-api",
+    "storage_bucket": "aura-fitness-api.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:177339568703:android:2a5178b71428a606415e8a",
+        "android_client_info": {
+          "package_name": "com.aura.fitness"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "177339568703-cbcgasu4ulq85msco51n1kg5iku7usks.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCCx1y4787e6G09a7QXdp4vdZYpdi24CHc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "177339568703-cbcgasu4ulq85msco51n1kg5iku7usks.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
