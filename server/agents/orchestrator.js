@@ -1,6 +1,7 @@
 const { GoogleGenAI } = require('@google/genai');
 const { buildAgentContext, formatContextBlock, formatCompletionDirective } = require('./memory');
 const { evaluateSet } = require('./motivation');
+const { TIMEOUTS, withTimeout } = require('./types');
 
 const MODEL_NAME = 'gemini-3.1-flash-lite-preview';
 
@@ -187,10 +188,11 @@ async function handleMessage({ message, history, userContext }) {
     } else if (call.name === 'modify_workout') {
       const { handleWorkoutModification } = require('./planning');
       try {
-        const modResult = await Promise.race([
+        const modResult = await withTimeout(
           handleWorkoutModification(call.args, agentContext),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Workout modification timed out')), 20000)),
-        ]);
+          TIMEOUTS.planningInner,
+          'Planning Agent (via orchestrator)'
+        );
 
         const toolResult = await chat.sendMessage({
           message: [{

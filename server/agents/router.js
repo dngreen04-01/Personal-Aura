@@ -2,29 +2,9 @@ const { handleMessage } = require('./orchestrator');
 const { handleSwapRequest, handlePlanModification, handleProgressiveOverload, handleWorkoutModification } = require('./planning');
 const { generateExerciseDemo } = require('./visual');
 const { buildAgentContext } = require('./memory');
-const { AGENTS, buildAgentResponse, logInteraction } = require('./types');
+const { AGENTS, TIMEOUTS, withTimeout, buildAgentResponse, logInteraction } = require('./types');
 const { evaluateSet, checkMilestone, buildMotivationDirective } = require('./motivation');
 
-/**
- * Race a promise against a timeout. Rejects with a descriptive error on timeout.
- */
-function withTimeout(promise, ms, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    ),
-  ]);
-}
-
-// Per-agent timeout budgets (ms)
-const TIMEOUTS = {
-  memory: 2000,
-  orchestrator: 30000,  // generous for function-calling round-trips
-  planning: 45000,      // Pro model needs more time for structured JSON + weight estimation
-  visual: 30000,
-  motivation: 500,
-};
 
 /**
  * Classify user intent via keyword matching (<1ms).
@@ -103,10 +83,19 @@ async function routeRequest({ message, history, userContext }) {
   const startTime = Date.now();
 
   const intent = classifyIntent(message);
+  let intentSource = 'router';
 
   // --- Ready intent: deterministic response, no LLM needed ---
   if (intent === 'ready') {
     const exercises = userContext.currentDay?.exercises || [];
+    const totalLatency = Date.now() - startTime;
+    logInteraction({
+      userMessage: message,
+      agentsInvoked: [AGENTS.memory],
+      intent,
+      intentSource,
+      totalLatencyMs: totalLatency,
+    });
     return buildAgentResponse({
       text: "Let's crush it! Here's your workout:",
       workoutCard: {
@@ -139,6 +128,8 @@ async function routeRequest({ message, history, userContext }) {
       logInteraction({
         userMessage: message,
         agentsInvoked: [AGENTS.orchestrator, AGENTS.memory, AGENTS.planning],
+        intent,
+        intentSource,
         planningLatencyMs: planningLatency,
         totalLatencyMs: totalLatency,
       });
@@ -158,6 +149,7 @@ async function routeRequest({ message, history, userContext }) {
     } catch (err) {
       // Fallback: let orchestrator handle it via function calling
       console.error(`Planning agent failed (intent: ${intent}), falling back to orchestrator:`, err.message);
+      intentSource = 'orchestrator-fallback';
     }
   }
 
@@ -193,6 +185,8 @@ async function routeRequest({ message, history, userContext }) {
       logInteraction({
         userMessage: message,
         agentsInvoked: [AGENTS.orchestrator, AGENTS.memory, AGENTS.visual],
+        intent,
+        intentSource,
         visualLatencyMs: visualLatency,
         totalLatencyMs: totalLatency,
       });
@@ -209,6 +203,7 @@ async function routeRequest({ message, history, userContext }) {
       });
     } catch (err) {
       console.error('Visual agent failed, falling back to orchestrator:', err.message);
+      intentSource = 'orchestrator-fallback';
     }
   }
 
@@ -276,6 +271,8 @@ async function routeRequest({ message, history, userContext }) {
   logInteraction({
     userMessage: message,
     agentsInvoked: agentsUsed,
+    intent,
+    intentSource,
     orchestratorLatencyMs: orchestratorLatency,
     motivationLatencyMs: motivationLatency,
     totalLatencyMs: totalLatency,
