@@ -57,35 +57,24 @@ export default function AuthScreen() {
       // Auth state listener in AuthProvider will handle navigation
     } catch (err) {
       // User cancelled — return silently
-      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
-        setLoading(false);
-        return;
-      }
-      // SDK-specific errors
-      if (err.code === statusCodes.IN_PROGRESS) {
-        setLoading(false);
-        return;
-      }
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) return;
+      if (err.code === statusCodes.IN_PROGRESS) return;
       if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
         setError('Google Play Services required for Google Sign-In. Use email instead.');
-        setLoading(false);
         return;
       }
-      // Developer config error (wrong SHA-1 or webClientId)
       if (err.code === statusCodes.SIGN_IN_REQUIRED || err.message?.includes('DEVELOPER_ERROR')) {
         console.warn('[Auth] Google Sign-In config error:', err);
         setError('Google Sign-In configuration error. Please contact support.');
-        setLoading(false);
         return;
       }
-      // Firebase errors (account collision, etc.)
       if (err.code === 'auth/account-exists-with-different-credential') {
         setError('An account with this email already exists. Sign in with your original method.');
-        setLoading(false);
         return;
       }
       console.warn('[Auth] Google sign-in failed:', err.code || err.message);
       setError(getErrorMessage(err.code) || 'Google Sign-In failed. Please try again.');
+    } finally {
       setLoading(false);
     }
   };
@@ -97,25 +86,18 @@ export default function AuthScreen() {
       await signInWithApple();
       // Auth state listener in AuthProvider will handle navigation
     } catch (err) {
-      // User cancelled — return silently
-      if (err.code === 'ERR_REQUEST_CANCELED' || err.code === 'ERR_CANCELED') {
-        setLoading(false);
-        return;
-      }
-      // Apple service unavailable
+      if (err.code === 'ERR_REQUEST_CANCELED' || err.code === 'ERR_CANCELED') return;
       if (err.code === 'ERR_REQUEST_FAILED') {
         setError('Apple Sign-In unavailable. Try again or use email.');
-        setLoading(false);
         return;
       }
-      // Firebase errors (account collision, etc.)
       if (err.code === 'auth/account-exists-with-different-credential') {
         setError('An account with this email already exists. Sign in with your original method.');
-        setLoading(false);
         return;
       }
       console.warn('[Auth] Apple sign-in failed:', err.code || err.message);
       setError(getErrorMessage(err.code) || 'Apple Sign-In failed. Please try again.');
+    } finally {
       setLoading(false);
     }
   };

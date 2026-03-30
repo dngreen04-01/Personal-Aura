@@ -463,7 +463,7 @@ export default function WorkoutScreen() {
     if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
     cancelAll();
     clearRestTimer().catch(() => {});
-    if (sessionId) await endSession(sessionId);
+    if (sessionId && !showComplete) await endSession(sessionId);
     router.back();
   };
 
