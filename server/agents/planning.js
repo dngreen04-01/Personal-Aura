@@ -1,4 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
+const { formatTrainingHistory } = require('./memory');
 
 const MODEL_NAME = 'gemini-3.1-pro-preview';
 
@@ -64,6 +65,10 @@ function buildPlanningPrompt(message, agentContext) {
     if (progression.pushReason) parts.push(`Push Reason: ${progression.pushReason}`);
     if (progression.rpeTrend) parts.push(`RPE Trend: ${progression.rpeTrend}`);
   }
+
+  // Append training history if available
+  const historyBlock = formatTrainingHistory(agentContext);
+  if (historyBlock) parts.push(historyBlock);
 
   return parts.join('\n');
 }
@@ -206,6 +211,9 @@ async function handleWorkoutModification(argsOrMessage, agentContext) {
     agentContext.user?.age ? `Age: ${agentContext.user.age}` : null,
   ].filter(Boolean).join(', ');
 
+  // Build training history context
+  const trainingHistoryBlock = formatTrainingHistory(agentContext);
+
   const systemPrompt = `${BASE_IDENTITY}
 
 Your task: ${modificationType === 'replace'
@@ -216,23 +224,30 @@ User's equipment: ${agentContext.user?.equipment || 'full gym'}
 User's goal: ${agentContext.user?.goal || 'general fitness'}
 ${userStats ? `User stats: ${userStats}` : ''}
 ${contextBlock}
+${trainingHistoryBlock}
 
 User's request: ${instructions}
 
-Weight Estimation Rules:
+Training History Guardrails:
+- ALWAYS check the Recent Training History before selecting exercises.
+- Do NOT include exercises that target a muscle group trained in the last 48 hours, unless the user explicitly requests it.
+- When the user's recent training shows a muscle group gap (not trained in 5+ days), prefer exercises that fill that gap.
+- In your "text" response, briefly mention what was recently trained. Example: "Since you hit chest and shoulders yesterday, I'm focusing today on back and biceps."
+${modificationType === 'replace' ? '- This is a ONE-OFF session, not part of the training program. Include this note in your text response: mention that their regular program resumes tomorrow.' : ''}
+
+Weight Rules:
 - Every exercise MUST have a specific numeric targetWeight in kg (e.g. "40kg"). Never use null or omit it.
-- For compound barbell exercises: estimate based on body weight ratios and the user's goal.
-- For isolation/dumbbell/cable exercises: estimate conservatively (start lighter).
+- If the user has logged the exercise before (check Recent Exercise Weights above), use their actual weight history to set an appropriate target. Set "isEstimated": false for these.
+- For exercises the user has NOT done before: estimate based on body weight ratios and performance on similar movements. Set "isEstimated": true.
 - For bodyweight exercises (push-ups, pull-ups, etc.): use "0kg".
 - Round to nearest 2.5kg for barbell, nearest 1kg for dumbbell/cable.
-- All weights are estimates — set "isEstimated": true on every exercise.
 
 You MUST respond with valid JSON matching this exact schema:
 {
-  "text": "Brief confirmation message (1-2 sentences)",
+  "text": "Brief confirmation message referencing recent training (1-2 sentences)",
   "workoutCard": {
     "focus": "Updated focus label",
-    "exercises": [{ "name": "Exercise Name", "sets": 3, "reps": "8-10", "targetWeight": "40kg", "isEstimated": true, "restSeconds": 90 }],
+    "exercises": [{ "name": "Exercise Name", "sets": 3, "reps": "8-10", "targetWeight": "40kg", "isEstimated": false, "restSeconds": 90 }],
     "estimatedDuration": 45,
     "modificationType": "${modificationType}"
   }

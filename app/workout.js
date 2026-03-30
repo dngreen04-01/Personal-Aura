@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames, saveRestTimer, clearRestTimer, getActiveRestTimer } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames, saveRestTimer, clearRestTimer, getActiveRestTimer, getTrainingContext } from '../lib/database';
 import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import ExerciseDetail from '../components/ExerciseDetail';
 import BeginSetModal from '../components/BeginSetModal';
@@ -332,6 +332,9 @@ export default function WorkoutScreen() {
     setAiResponse(null);
     setIsAiLoading(true);
     try {
+      let trainingCtx = null;
+      try { trainingCtx = await getTrainingContext(7); } catch {}
+
       const userContext = buildUserContext({
         profile: userProfile,
         exercise: {
@@ -344,6 +347,7 @@ export default function WorkoutScreen() {
         },
         location,
         motivation: { exerciseMaxWeight, streakData, completedSessions },
+        trainingContext: trainingCtx,
       });
       const data = await sendAgentMessage(text, [], userContext);
       setAiResponse({ text: data.text });

@@ -28,6 +28,14 @@
 **Depends on:** Apple Developer account + EAS iOS signing credentials configured
 **Context:** Add `eas build --platform ios --profile preview --non-interactive` step to the existing workflow. Requires EAS credentials as GitHub secrets.
 
+### Training Intelligence Service (Approach C)
+**What:** Extract a dedicated `TrainingIntelligence` service that maintains a running model of the user's training state: muscle group fatigue levels, progressive overload readiness per exercise, weekly volume targets vs actuals, and deload signals. Agents query this service instead of raw DB functions.
+**Why:** The current approach (Approach B) passes raw history to AI prompts and relies on the LLM to reason about muscle group balance, fatigue, and progressive overload. A dedicated service would compute these deterministically, making AI decisions more consistent and reducing prompt size. Also enables auto-triggered plan adjustments when the user's actual training diverges from their plan.
+**Effort:** L (human) / M (CC+gstack)
+**Priority:** P2
+**Depends on:** Approach B (history-aware context) shipped and validated with real users
+**Context:** Identified during CEO review 2026-03-31. The ideal long-term architecture, but premature for a pre-PMF app. Revisit after validating that history-aware prompts (Approach B) meaningfully improve workout quality from user feedback.
+
 ## Bugs (from adversarial review, PR #4)
 
 ### Background notification handler opens anonymous DB after app kill
