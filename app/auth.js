@@ -8,7 +8,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { colors, spacing, radius } from '../lib/theme';
-import { signIn, signUp, resetPassword } from '../lib/auth';
+import {
+  signIn, signUp, resetPassword,
+  signInWithGoogle, signInWithApple,
+  statusCodes,
+} from '../lib/auth';
 
 export default function AuthScreen() {
   const router = useRouter();
@@ -45,6 +49,77 @@ export default function AuthScreen() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithGoogle();
+      // Auth state listener in AuthProvider will handle navigation
+    } catch (err) {
+      // User cancelled — return silently
+      if (err.code === statusCodes.SIGN_IN_CANCELLED) {
+        setLoading(false);
+        return;
+      }
+      // SDK-specific errors
+      if (err.code === statusCodes.IN_PROGRESS) {
+        setLoading(false);
+        return;
+      }
+      if (err.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        setError('Google Play Services required for Google Sign-In. Use email instead.');
+        setLoading(false);
+        return;
+      }
+      // Developer config error (wrong SHA-1 or webClientId)
+      if (err.code === statusCodes.SIGN_IN_REQUIRED || err.message?.includes('DEVELOPER_ERROR')) {
+        console.warn('[Auth] Google Sign-In config error:', err);
+        setError('Google Sign-In configuration error. Please contact support.');
+        setLoading(false);
+        return;
+      }
+      // Firebase errors (account collision, etc.)
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        setError('An account with this email already exists. Sign in with your original method.');
+        setLoading(false);
+        return;
+      }
+      console.warn('[Auth] Google sign-in failed:', err.code || err.message);
+      setError(getErrorMessage(err.code) || 'Google Sign-In failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      await signInWithApple();
+      // Auth state listener in AuthProvider will handle navigation
+    } catch (err) {
+      // User cancelled — return silently
+      if (err.code === 'ERR_REQUEST_CANCELED' || err.code === 'ERR_CANCELED') {
+        setLoading(false);
+        return;
+      }
+      // Apple service unavailable
+      if (err.code === 'ERR_REQUEST_FAILED') {
+        setError('Apple Sign-In unavailable. Try again or use email.');
+        setLoading(false);
+        return;
+      }
+      // Firebase errors (account collision, etc.)
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        setError('An account with this email already exists. Sign in with your original method.');
+        setLoading(false);
+        return;
+      }
+      console.warn('[Auth] Apple sign-in failed:', err.code || err.message);
+      setError(getErrorMessage(err.code) || 'Apple Sign-In failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
   const canSubmit = () => {
     if (mode === 'reset') return email.trim().length > 0;
     if (mode === 'signup') return email.trim().length > 0 && password.length >= 6 && displayName.trim().length > 0;
@@ -76,6 +151,57 @@ export default function AuthScreen() {
             <Text style={styles.formTitle}>
               {mode === 'signin' ? 'Welcome back' : mode === 'signup' ? 'Create your account' : 'Reset password'}
             </Text>
+
+            {/* Social auth buttons (shown in both signin and signup modes) */}
+            {mode !== 'reset' && (
+              <>
+                <TouchableOpacity
+                  style={[styles.socialButton, styles.googleButton]}
+                  onPress={handleGoogleSignIn}
+                  disabled={loading}
+                  accessibilityLabel="Sign in with Google"
+                  accessibilityRole="button"
+                >
+                  {loading ? (
+                    <ActivityIndicator size="small" color={colors.textPrimary} />
+                  ) : (
+                    <>
+                      <Text style={styles.googleIcon}>G</Text>
+                      <Text style={styles.socialButtonText}>Continue with Google</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Apple Sign-In: requires Apple Developer account. Uncomment when ready. */}
+                {false && Platform.OS === 'ios' && (
+                  <TouchableOpacity
+                    style={[styles.socialButton, styles.appleButton]}
+                    onPress={handleAppleSignIn}
+                    disabled={loading}
+                    accessibilityLabel="Sign in with Apple"
+                    accessibilityRole="button"
+                  >
+                    {loading ? (
+                      <ActivityIndicator size="small" color={colors.bgDark} />
+                    ) : (
+                      <>
+                        <MaterialIcons name="apple" size={20} color={colors.bgDark} />
+                        <Text style={[styles.socialButtonText, { color: colors.bgDark }]}>
+                          Continue with Apple
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                {/* Divider */}
+                <View style={styles.dividerRow}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+              </>
+            )}
 
             {mode === 'reset' && resetSent ? (
               <View style={styles.successCard}>
@@ -220,6 +346,8 @@ function getErrorMessage(code) {
       return 'Too many attempts. Please try again later.';
     case 'auth/network-request-failed':
       return 'Network error. Check your connection.';
+    case 'auth/account-exists-with-different-credential':
+      return 'An account with this email already exists. Sign in with your original method.';
     default:
       return 'Something went wrong. Please try again.';
   }
@@ -270,6 +398,51 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.sm,
   },
+  // Social auth buttons
+  socialButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    borderWidth: 1,
+  },
+  googleButton: {
+    backgroundColor: 'transparent',
+    borderColor: colors.borderLight,
+  },
+  appleButton: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#FFFFFF',
+  },
+  googleIcon: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: colors.textPrimary,
+  },
+  socialButtonText: {
+    fontSize: 15,
+    fontFamily: 'Inter_600SemiBold',
+    color: colors.textPrimary,
+  },
+  // Divider
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.borderLight,
+  },
+  dividerText: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    color: colors.textMuted,
+  },
+  // Existing styles
   inputGroup: {
     gap: spacing.xs,
   },
