@@ -38,29 +38,17 @@
 
 ## Bugs (from adversarial review, PR #4)
 
-### Background notification handler opens anonymous DB after app kill
-**What:** `_layout.js` background event handler calls `getActiveRestTimer()` without a UID. After app kill + restore, `getDatabase()` opens `aura.db` (anonymous) instead of `aura_<uid>.db`. The +15s extend from lock screen silently fails because the timer row doesn't exist in the anonymous DB.
-**Why:** Users who tap "+15s" on the lock screen notification after the app was killed think the timer extended, but it didn't.
-**Priority:** P2
-**Context:** Architectural limitation. Background handlers don't have auth state. Options: persist timer to a UID-independent table, store active UID in AsyncStorage for background access, or accept the limitation and document it.
-**File:** `app/_layout.js:23-45`
+### ~~Background notification handler opens anonymous DB after app kill~~ ✅ Fixed
+**Fixed:** UID is now persisted to AsyncStorage and restored in the background notification handler. See commit `46e42b8`.
 
 ### ~~Sync queue getDatabase() without UID race condition~~ ✅ Fixed
 **Fixed:** All 4 `getDatabase()` calls in `sync.js` now pass `uid`. Added `currentUid` guards on realtime listener callbacks to prevent writes after teardown.
 
-### Sync queue cleanup race — phantom failed entries
-**What:** `attemptFirestoreWrite` dequeues sync items by `(collection, document_id)` query after a successful write. If `queueSync`'s INSERT hasn't committed by the time the cleanup query runs (both are async), the item stays in the queue forever. It retries, succeeds again (idempotent), but is never deleted. Eventually marked 'failed' after max retries, inflating `syncStatus.pendingCount` in the UI.
-**Why:** User sees a growing error count even though all data is actually synced.
-**Priority:** P2
-**Context:** Fix: `await queueSync()` before the immediate write attempt, or delete by primary key instead of `(collection, document_id)`.
-**File:** `lib/sync.js:250-258`
+### ~~Sync queue cleanup race — phantom failed entries~~ ✅ Fixed
+**Fixed:** `pushToCloud` now chains `queueSync()` before `attemptFirestoreWrite()`, and cleanup deletes by primary key instead of querying by `(collection, document_id)`. See commit `87e5a89`.
 
-### JSON.parse on navigation params without try/catch
-**What:** `workout.js` lines 26-27 do `JSON.parse(dayJson)` and `JSON.parse(locationJson)` without try/catch. React Native navigation can silently truncate large JSON params (Android Intent extras have ~500KB limits). A truncated JSON string throws `SyntaxError`, crashing the workout screen with a red screen.
-**Why:** The workout plan JSON can be large (7-day plan with exercises, instructions, muscle groups). A crash here means the user can't start their workout.
-**Priority:** P1
-**Context:** Fix: wrap both `JSON.parse` calls in try/catch with fallback to null.
-**File:** `app/workout.js:26-27`
+### ~~JSON.parse on navigation params without try/catch~~ ✅ Fixed
+**Fixed:** Both `JSON.parse` calls in `workout.js` are now wrapped in try/catch with fallback to `null`. Truncated JSON from Android Intent extras no longer crashes the workout screen.
 
 ### Volume query not unit-normalized in getRecentProgressSummary
 **What:** `getRecentProgressSummary` sums `weight * reps` without checking `weight_unit`. A user who switches between lbs and kg, or has mixed entries, gets wrong volume trends. Other volume queries in the same file (e.g., `getWeeklyVolume` at line 788) correctly normalize with `CASE WHEN weight_unit = 'lbs' THEN weight * 0.453592 ELSE weight END`.
