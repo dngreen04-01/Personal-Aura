@@ -7,6 +7,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
+import { MINUTES_PER_EXERCISE, MIN_WORKOUT_DURATION } from '../lib/constants';
 import { sendAgentMessage } from '../lib/api';
 import { getUserProfile, getCachedExercisesByNames } from '../lib/database';
 import { buildUserContext } from '../lib/contextBuilder';
@@ -43,7 +44,7 @@ export default function WorkoutSummaryScreen() {
   }, []);
 
   const totalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
-  const estMinutes = Math.max(30, exercises.length * 8);
+  const estMinutes = Math.max(MIN_WORKOUT_DURATION, exercises.length * MINUTES_PER_EXERCISE);
   const intensity = totalSets > 18 ? 'High' : totalSets > 12 ? 'Medium' : 'Light';
 
   const handleSend = async () => {

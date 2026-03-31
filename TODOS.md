@@ -53,16 +53,8 @@
 ### ~~Volume query not unit-normalized in getRecentProgressSummary~~ ✅ Fixed
 **Fixed:** Both volume subqueries in `getRecentProgressSummary` now normalize with `CASE WHEN s.weight_unit = 'lbs' THEN s.weight * 0.453592 ELSE s.weight END`, matching the pattern used by `getWeeklyVolume` and other volume queries.
 
-### getPersonalRecords improvement percentage always 0%
-**What:** The `second_best` CTE in `getPersonalRecords` uses `MAX(weight_normalized)`, which returns the same all-time maximum as the `best` CTE. `improvement_pct` is always `(best - best) / best = 0`. The progress screen never shows any improvement percentage for PRs.
-**Why:** Users never see how much they improved on a PR, which is one of the most motivating data points in fitness tracking.
-**Priority:** P2
-**Context:** Fix: use `MAX` excluding the best weight (filter to rows where `weight_normalized < (SELECT MAX(...))`) or use `RANK()` window function.
-**File:** `lib/database.js:915-936`
+### ~~getPersonalRecords improvement percentage always 0%~~ ✅ Fixed
+**Fixed:** Corrected the `second_best` CTE to exclude the PR weight, so `improvement_pct` now reflects actual improvement. See commit `6bf0433`.
 
-### Duration estimate magic numbers scattered across 5+ files
-**What:** Workout duration is estimated using a magic number (minutes per exercise) in 5+ locations: `server/agents/memory.js:132`, `server/routes/agent.js:63`, `components/InlineWorkoutCard.js:13`, `server/agents/router.js:115`, `app/change-focus.js:74`, `app/workout-summary.js:46`. All currently use 8, but the lack of a shared constant means future edits risk re-introducing the mismatch bug fixed in PR #4.
-**Why:** The duration mismatch bug (greeting said 24 min, card said 48 min) was caused by this exact pattern. A shared constant prevents recurrence.
-**Priority:** P3
-**Context:** Extract to a shared constant (e.g., `MINUTES_PER_EXERCISE = 8`) importable by both server and client code.
-**Files:** `server/agents/memory.js`, `server/routes/agent.js`, `components/InlineWorkoutCard.js`, `server/agents/router.js`, `app/change-focus.js`, `app/workout-summary.js`
+### ~~Duration estimate magic numbers scattered across 5+ files~~ ✅ Fixed
+**Fixed:** Extracted `MINUTES_PER_EXERCISE` and `MIN_WORKOUT_DURATION` to `lib/constants.js`. All 6 files now import from the shared constant.

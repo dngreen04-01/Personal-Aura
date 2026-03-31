@@ -4,6 +4,7 @@ const { routeRequest } = require('../agents/router');
 const { generateExerciseDemo, generateFormCheck, generateWorkoutCard } = require('../agents/visual');
 const { AGENTS } = require('../agents/types');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { MINUTES_PER_EXERCISE } = require('../../lib/constants');
 const { getWorkoutStreak, getUserProfile } = require('../services/firestore');
 const router = express.Router();
 
@@ -60,7 +61,7 @@ Guidelines:
 - Reference the time of day naturally
 - If they have an active streak, mention it encouragingly (e.g., "3 days strong!")
 - If they have recent progress (PRs, volume increases), mention one highlight briefly
-- Describe today's scheduled workout specifically: name the focus area, exercise count, and estimated duration (assume ~8 min per exercise including rest periods)
+- Describe today's scheduled workout specifically: name the focus area, exercise count, and estimated duration (assume ~${MINUTES_PER_EXERCISE} min per exercise including rest periods)
 - Ask if they're ready or want to adjust anything (shorter, different focus, etc.)
 - Be warm, motivating, and concise — no generic filler`;
 
