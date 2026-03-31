@@ -50,12 +50,8 @@
 ### ~~JSON.parse on navigation params without try/catch~~ ✅ Fixed
 **Fixed:** Both `JSON.parse` calls in `workout.js` are now wrapped in try/catch with fallback to `null`. Truncated JSON from Android Intent extras no longer crashes the workout screen.
 
-### Volume query not unit-normalized in getRecentProgressSummary
-**What:** `getRecentProgressSummary` sums `weight * reps` without checking `weight_unit`. A user who switches between lbs and kg, or has mixed entries, gets wrong volume trends. Other volume queries in the same file (e.g., `getWeeklyVolume` at line 788) correctly normalize with `CASE WHEN weight_unit = 'lbs' THEN weight * 0.453592 ELSE weight END`.
-**Why:** The volume trend percentage feeds into the AI greeting context. A unit switch artifact could show a fake 120% volume increase, making the AI greeting misleading.
-**Priority:** P2
-**Context:** Fix: replace `s.weight * s.reps` with the unit-normalized version in both volume subqueries.
-**File:** `lib/database.js:1123-1129`
+### ~~Volume query not unit-normalized in getRecentProgressSummary~~ ✅ Fixed
+**Fixed:** Both volume subqueries in `getRecentProgressSummary` now normalize with `CASE WHEN s.weight_unit = 'lbs' THEN s.weight * 0.453592 ELSE s.weight END`, matching the pattern used by `getWeeklyVolume` and other volume queries.
 
 ### getPersonalRecords improvement percentage always 0%
 **What:** The `second_best` CTE in `getPersonalRecords` uses `MAX(weight_normalized)`, which returns the same all-time maximum as the `best` CTE. `improvement_pct` is always `(best - best) / best = 0`. The progress screen never shows any improvement percentage for PRs.
