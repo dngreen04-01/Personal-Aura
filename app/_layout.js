@@ -14,7 +14,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { colors } from '../lib/theme';
 import { AuthProvider } from '../lib/authContext';
 import { initNotifications, notifee, EventType, ACTION_BEGIN_SET, ACTION_EXTEND_15S } from '../lib/notifications';
-import { clearRestTimer, saveRestTimer, getActiveRestTimer } from '../lib/database';
+import { clearRestTimer, saveRestTimer, getActiveRestTimer, getDatabase, getPersistedUid } from '../lib/database';
 import { configureGoogleSignIn } from '../lib/auth';
 
 SplashScreen.preventAutoHideAsync();
@@ -24,11 +24,22 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (type !== EventType.ACTION_PRESS) return;
   const actionId = detail?.pressAction?.id;
 
-  if (actionId === ACTION_BEGIN_SET) {
-    await clearRestTimer().catch(() => {});
+  // Always cancel notifications on user action, even if DB can't be restored.
+  // This prevents alarms from blaring indefinitely if persisted UID is missing.
+  if (actionId === ACTION_BEGIN_SET || actionId === ACTION_EXTEND_15S) {
     await notifee.cancelNotification('rest-alarm').catch(() => {});
     await notifee.cancelNotification('rest-safety-net').catch(() => {});
     await notifee.cancelNotification('rest-countdown').catch(() => {});
+  }
+
+  // After app kill, module-level DB state is gone.
+  // Restore correct user-scoped database from persisted UID.
+  const uid = await getPersistedUid();
+  if (!uid) return;
+  await getDatabase(uid);
+
+  if (actionId === ACTION_BEGIN_SET) {
+    await clearRestTimer().catch(() => {});
   } else if (actionId === ACTION_EXTEND_15S) {
     // Extend timer in SQLite so workout.js picks it up on foreground
     try {
@@ -38,9 +49,6 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
         await saveRestTimer(newEndTime, saved.session_id, saved.exercise_name, saved.set_number, saved.total_sets, saved.exercise_index, saved.total_exercises, saved.rest_id);
       }
     } catch {}
-    await notifee.cancelNotification('rest-alarm').catch(() => {});
-    await notifee.cancelNotification('rest-safety-net').catch(() => {});
-    await notifee.cancelNotification('rest-countdown').catch(() => {});
   }
 });
 

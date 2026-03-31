@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radius, fonts } from '../lib/theme';
+import { MINUTES_PER_EXERCISE, MIN_WORKOUT_DURATION } from '../lib/constants';
 
 export default function InlineWorkoutCard({ workout, onStart }) {
   if (!workout) return null;
@@ -10,7 +11,7 @@ export default function InlineWorkoutCard({ workout, onStart }) {
 
   if (exercises.length === 0) return null;
 
-  const duration = estimatedDuration || Math.max(30, exercises.length * 8);
+  const duration = estimatedDuration || Math.max(MIN_WORKOUT_DURATION, exercises.length * MINUTES_PER_EXERCISE);
 
   return (
     <View style={styles.container}>

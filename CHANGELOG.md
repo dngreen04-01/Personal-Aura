@@ -2,6 +2,19 @@
 
 All notable changes to Aura will be documented in this file.
 
+## [1.0.2.0] - 2026-03-31
+
+### Fixed
+- Background notification handler now restores the correct user-scoped database after app kill. Tapping "+15s" or "Begin Set" on the lock screen actually works now.
+- Sync queue no longer writes to the wrong database during account transitions. All `getDatabase()` calls in sync.js pass the user's UID.
+- Phantom "failed sync" entries eliminated. Queue cleanup now chains properly and deletes by primary key instead of racing with the INSERT.
+- Workout screen no longer crashes when Android truncates large JSON navigation params. Both `JSON.parse` calls wrapped in try/catch with null fallback.
+- Volume trend in AI greeting context now normalizes weight units (kg/lbs) correctly, preventing fake volume spikes when switching units.
+- Personal records improvement percentage actually shows improvement now. The second-best CTE was comparing the PR against itself (always 0%).
+- Workout duration estimates use a shared `MINUTES_PER_EXERCISE` constant across all 6 files, preventing the greeting-says-24min-but-card-says-48min mismatch.
+- Realtime sync listeners now check UID identity (not just null), preventing stale callbacks from switching the active database during account transitions.
+- Notification alarms are always canceled on user action, even if the persisted UID is missing. No more infinite alarm loops.
+
 ## [1.0.1.0] - 2026-03-31
 
 ### Added

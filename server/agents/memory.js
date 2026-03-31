@@ -3,6 +3,7 @@
  * No LLM, no database. Pure functions that normalize the different
  * frontend context shapes into a single canonical shape.
  */
+const { MINUTES_PER_EXERCISE } = require('../../lib/constants');
 
 /**
  * Normalize any frontend context shape into the canonical agent context.
@@ -130,7 +131,7 @@ function buildGreetingContext({ streak, sessionCount, lastWorkoutFocus, lastWork
     parts.push(`Last workout: ${lastWorkoutFocus}${lastDate}`);
   }
   if (todayFocus) {
-    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises (~${todayExerciseCount * 8} min)` : '';
+    const exerciseInfo = todayExerciseCount ? ` with ${todayExerciseCount} exercises (~${todayExerciseCount * MINUTES_PER_EXERCISE} min)` : '';
     parts.push(`Today's scheduled workout: ${todayFocus}${exerciseInfo}`);
   }
   if (progressSummary) {

@@ -23,8 +23,10 @@ import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAla
 export default function WorkoutScreen() {
   const router = useRouter();
   const { dayJson, startIdx, locationJson } = useLocalSearchParams();
-  const day = dayJson ? JSON.parse(dayJson) : null;
-  const location = locationJson ? JSON.parse(locationJson) : null;
+  let day = null;
+  let location = null;
+  try { day = dayJson ? JSON.parse(dayJson) : null; } catch (_) {}
+  try { location = locationJson ? JSON.parse(locationJson) : null; } catch (_) {}
 
   const [sessionId, setSessionId] = useState(null);
   const [currentExIdx, setCurrentExIdx] = useState(parseInt(startIdx) || 0);

@@ -38,51 +38,23 @@
 
 ## Bugs (from adversarial review, PR #4)
 
-### Background notification handler opens anonymous DB after app kill
-**What:** `_layout.js` background event handler calls `getActiveRestTimer()` without a UID. After app kill + restore, `getDatabase()` opens `aura.db` (anonymous) instead of `aura_<uid>.db`. The +15s extend from lock screen silently fails because the timer row doesn't exist in the anonymous DB.
-**Why:** Users who tap "+15s" on the lock screen notification after the app was killed think the timer extended, but it didn't.
-**Priority:** P2
-**Context:** Architectural limitation. Background handlers don't have auth state. Options: persist timer to a UID-independent table, store active UID in AsyncStorage for background access, or accept the limitation and document it.
-**File:** `app/_layout.js:23-45`
+### ~~Background notification handler opens anonymous DB after app kill~~ ✅ Fixed
+**Fixed:** UID is now persisted to AsyncStorage and restored in the background notification handler. See commit `46e42b8`.
 
-### Sync queue getDatabase() without UID race condition
-**What:** `sync.js` calls `getDatabase()` without passing a UID in multiple locations (lines 101, 251, 366, 399). If `closeDatabase()` is called between operations (e.g., during sign-out while a realtime listener fires), it re-opens `aura.db` (anonymous) instead of the user's keyed database. Sync data could silently land in the wrong database.
-**Why:** Data written to the wrong DB is invisible to the user. Workout history could be silently lost on sign-out/sign-in transitions.
-**Priority:** P1
-**Context:** Fix: pass uid through `initialSyncIfNeeded` and all internal sync functions, or always call `getDatabase(uid)`.
-**File:** `lib/sync.js:101,251,366,399`
+### ~~Sync queue getDatabase() without UID race condition~~ ✅ Fixed
+**Fixed:** All 4 `getDatabase()` calls in `sync.js` now pass `uid`. Added `currentUid` guards on realtime listener callbacks to prevent writes after teardown.
 
-### Sync queue cleanup race — phantom failed entries
-**What:** `attemptFirestoreWrite` dequeues sync items by `(collection, document_id)` query after a successful write. If `queueSync`'s INSERT hasn't committed by the time the cleanup query runs (both are async), the item stays in the queue forever. It retries, succeeds again (idempotent), but is never deleted. Eventually marked 'failed' after max retries, inflating `syncStatus.pendingCount` in the UI.
-**Why:** User sees a growing error count even though all data is actually synced.
-**Priority:** P2
-**Context:** Fix: `await queueSync()` before the immediate write attempt, or delete by primary key instead of `(collection, document_id)`.
-**File:** `lib/sync.js:250-258`
+### ~~Sync queue cleanup race — phantom failed entries~~ ✅ Fixed
+**Fixed:** `pushToCloud` now chains `queueSync()` before `attemptFirestoreWrite()`, and cleanup deletes by primary key instead of querying by `(collection, document_id)`. See commit `87e5a89`.
 
-### JSON.parse on navigation params without try/catch
-**What:** `workout.js` lines 26-27 do `JSON.parse(dayJson)` and `JSON.parse(locationJson)` without try/catch. React Native navigation can silently truncate large JSON params (Android Intent extras have ~500KB limits). A truncated JSON string throws `SyntaxError`, crashing the workout screen with a red screen.
-**Why:** The workout plan JSON can be large (7-day plan with exercises, instructions, muscle groups). A crash here means the user can't start their workout.
-**Priority:** P1
-**Context:** Fix: wrap both `JSON.parse` calls in try/catch with fallback to null.
-**File:** `app/workout.js:26-27`
+### ~~JSON.parse on navigation params without try/catch~~ ✅ Fixed
+**Fixed:** Both `JSON.parse` calls in `workout.js` are now wrapped in try/catch with fallback to `null`. Truncated JSON from Android Intent extras no longer crashes the workout screen.
 
-### Volume query not unit-normalized in getRecentProgressSummary
-**What:** `getRecentProgressSummary` sums `weight * reps` without checking `weight_unit`. A user who switches between lbs and kg, or has mixed entries, gets wrong volume trends. Other volume queries in the same file (e.g., `getWeeklyVolume` at line 788) correctly normalize with `CASE WHEN weight_unit = 'lbs' THEN weight * 0.453592 ELSE weight END`.
-**Why:** The volume trend percentage feeds into the AI greeting context. A unit switch artifact could show a fake 120% volume increase, making the AI greeting misleading.
-**Priority:** P2
-**Context:** Fix: replace `s.weight * s.reps` with the unit-normalized version in both volume subqueries.
-**File:** `lib/database.js:1123-1129`
+### ~~Volume query not unit-normalized in getRecentProgressSummary~~ ✅ Fixed
+**Fixed:** Both volume subqueries in `getRecentProgressSummary` now normalize with `CASE WHEN s.weight_unit = 'lbs' THEN s.weight * 0.453592 ELSE s.weight END`, matching the pattern used by `getWeeklyVolume` and other volume queries.
 
-### getPersonalRecords improvement percentage always 0%
-**What:** The `second_best` CTE in `getPersonalRecords` uses `MAX(weight_normalized)`, which returns the same all-time maximum as the `best` CTE. `improvement_pct` is always `(best - best) / best = 0`. The progress screen never shows any improvement percentage for PRs.
-**Why:** Users never see how much they improved on a PR, which is one of the most motivating data points in fitness tracking.
-**Priority:** P2
-**Context:** Fix: use `MAX` excluding the best weight (filter to rows where `weight_normalized < (SELECT MAX(...))`) or use `RANK()` window function.
-**File:** `lib/database.js:915-936`
+### ~~getPersonalRecords improvement percentage always 0%~~ ✅ Fixed
+**Fixed:** Corrected the `second_best` CTE to exclude the PR weight, so `improvement_pct` now reflects actual improvement. See commit `6bf0433`.
 
-### Duration estimate magic numbers scattered across 5+ files
-**What:** Workout duration is estimated using a magic number (minutes per exercise) in 5+ locations: `server/agents/memory.js:132`, `server/routes/agent.js:63`, `components/InlineWorkoutCard.js:13`, `server/agents/router.js:115`, `app/change-focus.js:74`, `app/workout-summary.js:46`. All currently use 8, but the lack of a shared constant means future edits risk re-introducing the mismatch bug fixed in PR #4.
-**Why:** The duration mismatch bug (greeting said 24 min, card said 48 min) was caused by this exact pattern. A shared constant prevents recurrence.
-**Priority:** P3
-**Context:** Extract to a shared constant (e.g., `MINUTES_PER_EXERCISE = 8`) importable by both server and client code.
-**Files:** `server/agents/memory.js`, `server/routes/agent.js`, `components/InlineWorkoutCard.js`, `server/agents/router.js`, `app/change-focus.js`, `app/workout-summary.js`
+### ~~Duration estimate magic numbers scattered across 5+ files~~ ✅ Fixed
+**Fixed:** Extracted `MINUTES_PER_EXERCISE` and `MIN_WORKOUT_DURATION` to `lib/constants.js`. All 6 files now import from the shared constant.

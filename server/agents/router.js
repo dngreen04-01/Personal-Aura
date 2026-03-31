@@ -4,6 +4,7 @@ const { generateExerciseDemo } = require('./visual');
 const { buildAgentContext } = require('./memory');
 const { AGENTS, TIMEOUTS, withTimeout, buildAgentResponse, logInteraction } = require('./types');
 const { evaluateSet, checkMilestone, buildMotivationDirective } = require('./motivation');
+const { MINUTES_PER_EXERCISE, MIN_WORKOUT_DURATION } = require('../../lib/constants');
 
 
 /**
@@ -101,7 +102,7 @@ async function routeRequest({ message, history, userContext }) {
       workoutCard: {
         focus: userContext.currentDay?.focus || 'Workout',
         exercises,
-        estimatedDuration: Math.max(30, exercises.length * 8),
+        estimatedDuration: Math.max(MIN_WORKOUT_DURATION, exercises.length * MINUTES_PER_EXERCISE),
         modificationType: 'original',
       },
       agentsUsed: [AGENTS.memory],
