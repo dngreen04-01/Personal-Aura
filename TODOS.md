@@ -45,12 +45,8 @@
 **Context:** Architectural limitation. Background handlers don't have auth state. Options: persist timer to a UID-independent table, store active UID in AsyncStorage for background access, or accept the limitation and document it.
 **File:** `app/_layout.js:23-45`
 
-### Sync queue getDatabase() without UID race condition
-**What:** `sync.js` calls `getDatabase()` without passing a UID in multiple locations (lines 101, 251, 366, 399). If `closeDatabase()` is called between operations (e.g., during sign-out while a realtime listener fires), it re-opens `aura.db` (anonymous) instead of the user's keyed database. Sync data could silently land in the wrong database.
-**Why:** Data written to the wrong DB is invisible to the user. Workout history could be silently lost on sign-out/sign-in transitions.
-**Priority:** P1
-**Context:** Fix: pass uid through `initialSyncIfNeeded` and all internal sync functions, or always call `getDatabase(uid)`.
-**File:** `lib/sync.js:101,251,366,399`
+### ~~Sync queue getDatabase() without UID race condition~~ ✅ Fixed
+**Fixed:** All 4 `getDatabase()` calls in `sync.js` now pass `uid`. Added `currentUid` guards on realtime listener callbacks to prevent writes after teardown.
 
 ### Sync queue cleanup race — phantom failed entries
 **What:** `attemptFirestoreWrite` dequeues sync items by `(collection, document_id)` query after a successful write. If `queueSync`'s INSERT hasn't committed by the time the cleanup query runs (both are async), the item stays in the queue forever. It retries, succeeds again (idempotent), but is never deleted. Eventually marked 'failed' after max retries, inflating `syncStatus.pendingCount` in the UI.
