@@ -25,7 +25,11 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#20230f"
       },
-      "package": "com.aura.fitness"
+      "package": "com.aura.fitness",
+      "permissions": [
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_SPECIAL_USE"
+      ]
     },
     "plugins": [
       "expo-router",
@@ -40,7 +44,8 @@
         }
       ],
       "@react-native-google-signin/google-signin",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "@notifee/react-native"
     ],
     "extra": {
       "router": {},

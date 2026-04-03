@@ -27,6 +27,7 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
   // Always cancel notifications on user action, even if DB can't be restored.
   // This prevents alarms from blaring indefinitely if persisted UID is missing.
   if (actionId === ACTION_BEGIN_SET || actionId === ACTION_EXTEND_15S) {
+    await notifee.stopForegroundService().catch(() => {});
     await notifee.cancelNotification('rest-alarm').catch(() => {});
     await notifee.cancelNotification('rest-safety-net').catch(() => {});
     await notifee.cancelNotification('rest-countdown').catch(() => {});
@@ -50,6 +51,12 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       }
     } catch {}
   }
+});
+
+// Register Android foreground service handler — keeps the timer notification
+// alive as a foreground service so it persists when the app is backgrounded.
+notifee.registerForegroundService((notification) => {
+  return new Promise(() => {});
 });
 
 export default function RootLayout() {
