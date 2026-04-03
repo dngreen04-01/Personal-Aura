@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames, saveRestTimer, clearRestTimer, getActiveRestTimer, getTrainingContext } from '../lib/database';
+import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames, saveRestTimer, clearRestTimer, getActiveRestTimer, getTrainingContext, saveSessionState, getSessionState } from '../lib/database';
 import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import ExerciseDetail from '../components/ExerciseDetail';
 import BeginSetModal from '../components/BeginSetModal';
@@ -23,7 +23,7 @@ import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAla
 
 export default function WorkoutScreen() {
   const router = useRouter();
-  const { dayJson, startIdx, locationJson } = useLocalSearchParams();
+  const { dayJson, startIdx, locationJson, resumeSessionId } = useLocalSearchParams();
   let day = null;
   let location = null;
   try { day = dayJson ? JSON.parse(dayJson) : null; } catch (_) {}
@@ -149,8 +149,21 @@ export default function WorkoutScreen() {
   // Start session and check for timer recovery
   useEffect(() => {
     const init = async () => {
-      if (day) {
-        const id = await startSession(day.day, day.focus, location?.id || null);
+      if (resumeSessionId) {
+        const id = parseInt(resumeSessionId);
+        setSessionId(id);
+        try {
+          const state = await getSessionState(id);
+          if (state?.position_json) {
+            const pos = JSON.parse(state.position_json);
+            if (pos.currentExIdx != null) setCurrentExIdx(pos.currentExIdx);
+            if (pos.currentSet != null) setCurrentSet(pos.currentSet);
+            if (pos.completedExercises) setCompletedExercises(new Set(pos.completedExercises));
+            if (pos.exerciseSets) setExerciseSets(pos.exerciseSets);
+          }
+        } catch {}
+      } else if (day) {
+        const id = await startSession(day.day, day.focus, location?.id || null, { exercisesJson: JSON.stringify(day) });
         setSessionId(id);
       }
       try {
@@ -188,6 +201,20 @@ export default function WorkoutScreen() {
       cancelAll();
     };
   }, []);
+
+  // Persist session state on changes (debounced)
+  useEffect(() => {
+    if (!sessionId || !day) return;
+    const timeout = setTimeout(() => {
+      saveSessionState(sessionId, day, {
+        currentExIdx,
+        currentSet,
+        completedExercises: Array.from(completedExercises),
+        exerciseSets,
+      }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(timeout);
+  }, [sessionId, currentExIdx, currentSet, completedExercises, exerciseSets]);
 
   // Rest complete: show Begin Set modal instead of auto-advancing
   const completeRest = useCallback(() => {
@@ -248,6 +275,16 @@ export default function WorkoutScreen() {
   // Recalculate rest timer when app returns to foreground
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        if (sessionId && day) {
+          saveSessionState(sessionId, day, {
+            currentExIdx,
+            currentSet,
+            completedExercises: Array.from(completedExercises),
+            exerciseSets,
+          }).catch(() => {});
+        }
+      }
       if (nextState === 'active') {
         // If alarm already fired, ensure modal is visible and dismiss notification
         if (alarmFired) {
@@ -266,7 +303,7 @@ export default function WorkoutScreen() {
       }
     });
     return () => sub.remove();
-  }, [completeRest, alarmFired]);
+  }, [completeRest, alarmFired, sessionId, day, currentExIdx, currentSet, completedExercises, exerciseSets]);
 
   // Handle Notifee notification action button taps (foreground)
   useEffect(() => {

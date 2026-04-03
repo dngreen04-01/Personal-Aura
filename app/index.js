@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../lib/authContext';
-import { hasCompletedOnboarding } from '../lib/database';
+import { hasCompletedOnboarding, getIncompleteSession, discardSession } from '../lib/database';
 import { colors } from '../lib/theme';
 
 export default function Index() {
@@ -25,6 +25,31 @@ export default function Index() {
     try {
       const onboarded = await hasCompletedOnboarding();
       if (onboarded) {
+        const incomplete = await getIncompleteSession();
+        if (incomplete) {
+          const position = JSON.parse(incomplete.position_json || '{}');
+          Alert.alert(
+            'Resume Workout?',
+            `You have an unfinished ${incomplete.focus || 'workout'} session.`,
+            [
+              { text: 'Discard', style: 'destructive', onPress: async () => {
+                await discardSession(incomplete.id);
+                router.replace('/(tabs)');
+              }},
+              { text: 'Resume', onPress: () => {
+                router.replace({
+                  pathname: '/workout',
+                  params: {
+                    dayJson: incomplete.exercises_json,
+                    resumeSessionId: String(incomplete.id),
+                    startIdx: String(position.currentExIdx || 0),
+                  },
+                });
+              }},
+            ]
+          );
+          return;
+        }
         router.replace('/(tabs)');
       } else {
         router.replace('/onboarding');
