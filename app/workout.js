@@ -15,7 +15,7 @@ import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '..
 import ExerciseDetail from '../components/ExerciseDetail';
 import BeginSetModal from '../components/BeginSetModal';
 import { buildUserContext } from '../lib/contextBuilder';
-import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
+import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement, detectEquipmentType } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
 
 import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAlarm, cancelAll, notifee, EventType, ACTION_BEGIN_SET, ACTION_EXTEND_15S } from '../lib/notifications';
@@ -102,7 +102,7 @@ export default function WorkoutScreen() {
           // Load per-exercise unit preference
           const unit = await getExerciseUnitPreference(currentExercise.name);
           setWeightUnit(unit);
-          setWeightIncrement(getDefaultIncrement(unit));
+          setWeightIncrement(getDefaultIncrement(unit, currentExercise.name));
 
           // Load milestone data for motivation engine
           const [maxW, streak, sessions] = await Promise.all([
@@ -688,14 +688,14 @@ export default function WorkoutScreen() {
                         onSubmitEditing={() => {
                           const parsed = parseFloat(weightInputText);
                           if (!isNaN(parsed) && parsed >= 0) {
-                            setWeight(snapToIncrement(parsed, weightUnit));
+                            setWeight(snapToIncrement(parsed, weightUnit, currentExercise.name));
                           }
                           setIsEditingWeight(false);
                         }}
                         onBlur={() => {
                           const parsed = parseFloat(weightInputText);
                           if (!isNaN(parsed) && parsed >= 0) {
-                            setWeight(snapToIncrement(parsed, weightUnit));
+                            setWeight(snapToIncrement(parsed, weightUnit, currentExercise.name));
                           }
                           setIsEditingWeight(false);
                         }}
@@ -715,10 +715,10 @@ export default function WorkoutScreen() {
                         style={styles.unitToggle}
                         onPress={() => {
                           const newUnit = weightUnit === 'kg' ? 'lbs' : 'kg';
-                          const converted = snapToIncrement(convertWeight(weight, weightUnit, newUnit), newUnit);
+                          const converted = snapToIncrement(convertWeight(weight, weightUnit, newUnit), newUnit, currentExercise.name);
                           setWeight(converted);
                           setWeightUnit(newUnit);
-                          setWeightIncrement(getDefaultIncrement(newUnit));
+                          setWeightIncrement(getDefaultIncrement(newUnit, currentExercise.name));
                           setExerciseUnitPreference(currentExercise.name, newUnit);
                         }}
                       >

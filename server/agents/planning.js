@@ -17,11 +17,17 @@ Primary/Secondary Movers:
 - Deadlift: Primary glutes + hamstrings, secondary erector spinae + lats`;
 
 const PROGRESSIVE_OVERLOAD_RULES = `Progressive Overload Rules:
-- Build Muscle: Push when avg RPE < 7, increase by 2.5kg (upper) or 5kg (lower), rep range 8-12
-- Increase Strength: Push when avg RPE < 8, increase by 2.5kg (upper) or 5kg (lower), rep range 3-6
-- Lose Fat: Push conservatively when avg RPE < 6, increase by 1-2.5kg, maintain higher rep ranges 12-15
+- Build Muscle: Push when avg RPE < 7, rep range 8-12
+- Increase Strength: Push when avg RPE < 8, rep range 3-6
+- Lose Fat: Push conservatively when avg RPE < 6, use half the normal increment (min 1kg), maintain higher rep ranges 12-15
 - Plateau Detection: If no weight increase for 6+ sets of an exercise, flag as plateaued and suggest exercise variation or rep scheme change
-- RPE Calibration: If average RPE > 9, reduce weight by 5% for recovery`;
+- RPE Calibration: If average RPE > 9, reduce weight by 5% for recovery
+
+Equipment-Specific Increments (use these when suggesting weight increases):
+- Barbell exercises: +2.5kg upper body, +5kg lower body (plate pairs)
+- Dumbbell exercises: +2kg per hand
+- Cable exercises: +5kg (stack pin increments)
+- Machine exercises: +5kg (stack pin increments)`;
 
 const BASE_IDENTITY = `You are Aura's Planning Agent — an exercise physiologist specializing in program design, exercise selection, and biomechanics.
 
@@ -240,7 +246,7 @@ Weight Rules:
 - If the user has logged the exercise before (check Recent Exercise Weights above), use their actual weight history to set an appropriate target. Set "isEstimated": false for these.
 - For exercises the user has NOT done before: estimate based on body weight ratios and performance on similar movements. Set "isEstimated": true.
 - For bodyweight exercises (push-ups, pull-ups, etc.): use "0kg".
-- Round to nearest 2.5kg for barbell, nearest 1kg for dumbbell/cable.
+- Round to nearest 2.5kg for barbell, nearest 2kg for dumbbell, nearest 5kg for cable/machine.
 
 You MUST respond with valid JSON matching this exact schema:
 {
