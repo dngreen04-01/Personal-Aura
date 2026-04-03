@@ -15,6 +15,7 @@ export default function BeginSetModal({
   setNumber,
   totalSets,
   isLastSet,
+  isExerciseTransition,
   onBeginSet,
   onExtend,
 }) {
@@ -51,17 +52,17 @@ export default function BeginSetModal({
 
           <Text style={styles.exerciseName}>{exerciseName}</Text>
           <Text style={styles.setContext}>
-            {isLastSet ? 'FINAL SET' : `SET ${setNumber} OF ${totalSets}`}
+            {isLastSet ? 'FINAL SET' : isExerciseTransition ? 'ALL SETS COMPLETE' : `SET ${setNumber} OF ${totalSets}`}
           </Text>
 
-          {/* Begin Set / Complete Workout button */}
+          {/* Begin Set / Complete Workout / Next Exercise button */}
           <TouchableOpacity
             style={styles.beginButton}
             onPress={onBeginSet}
             activeOpacity={0.85}
           >
             <Text style={styles.beginButtonText}>
-              {isLastSet ? 'COMPLETE WORKOUT' : 'BEGIN SET'}
+              {isLastSet ? 'COMPLETE WORKOUT' : isExerciseTransition ? 'NEXT EXERCISE' : 'BEGIN SET'}
             </Text>
           </TouchableOpacity>
 

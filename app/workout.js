@@ -14,6 +14,7 @@ import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerc
 import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import ExerciseDetail from '../components/ExerciseDetail';
 import BeginSetModal from '../components/BeginSetModal';
+import ExerciseHub from '../components/ExerciseHub';
 import { buildUserContext } from '../lib/contextBuilder';
 import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement, detectEquipmentType } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
@@ -72,6 +73,9 @@ export default function WorkoutScreen() {
   const [showExerciseDetail, setShowExerciseDetail] = useState(false);
   const [isEstimatedWeight, setIsEstimatedWeight] = useState(false);
   const [alarmFired, setAlarmFired] = useState(false);
+  const [showExerciseHub, setShowExerciseHub] = useState(false);
+  const [completedExercises, setCompletedExercises] = useState(new Set());
+  const [exerciseSets, setExerciseSets] = useState({});
   const restIdRef = useRef(null);
   const alarmSoundCapRef = useRef(null);
   const inputRef = useRef(null);
@@ -288,10 +292,10 @@ export default function WorkoutScreen() {
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Calculate total sets completed across all exercises up to current
-  const completedSets = exercises.slice(0, currentExIdx).reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0) + (currentSet - 1);
+  // Calculate total sets completed using actual logged sets
+  const totalLoggedSets = Object.values(exerciseSets).reduce((sum, n) => sum + n, 0);
   const grandTotalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
-  const progressPercent = grandTotalSets > 0 ? Math.round((completedSets / grandTotalSets) * 100) : 0;
+  const progressPercent = grandTotalSets > 0 ? Math.round((totalLoggedSets / grandTotalSets) * 100) : 0;
 
   const handleShowMe = async () => {
     if (exerciseImage) {
@@ -366,6 +370,14 @@ export default function WorkoutScreen() {
     }
     setLastLoggedWeight(weight);
 
+    // Track logged sets per exercise index
+    setExerciseSets(prev => ({ ...prev, [currentExIdx]: (prev[currentExIdx] || 0) + 1 }));
+
+    // Mark exercise complete when all sets are done
+    if (currentSet >= totalSets) {
+      setCompletedExercises(prev => new Set(prev).add(currentExIdx));
+    }
+
     // Motivation Engine: evaluate set and provide structured coaching feedback
     if (rpe !== null) {
       const evaluation = evaluateSet({
@@ -417,9 +429,9 @@ export default function WorkoutScreen() {
     // Queue what happens after rest completes
     if (currentSet >= totalSets) {
       if (currentExIdx < exercises.length - 1) {
+        // Show Exercise Hub instead of auto-advancing
         pendingAdvanceRef.current = () => {
-          setCurrentExIdx(prev => prev + 1);
-          setCurrentSet(1);
+          setShowExerciseHub(true);
         };
       } else {
         const sid = sessionId;
@@ -459,9 +471,26 @@ export default function WorkoutScreen() {
     if (advance) {
       advance();
     } else if (currentSet > totalSets && currentExIdx < exercises.length - 1) {
-      setCurrentExIdx(prev => prev + 1);
-      setCurrentSet(1);
+      setShowExerciseHub(true);
     }
+  };
+
+  // Find the next incomplete exercise (suggested next)
+  const suggestedNextIdx = (() => {
+    for (let i = 0; i < exercises.length; i++) {
+      if (!completedExercises.has(i) && !(exerciseSets[i] > 0)) return i;
+    }
+    // All started — find first not fully completed
+    for (let i = 0; i < exercises.length; i++) {
+      if (!completedExercises.has(i)) return i;
+    }
+    return null;
+  })();
+
+  const handleExerciseHubSelect = (idx) => {
+    setShowExerciseHub(false);
+    setCurrentExIdx(idx);
+    setCurrentSet(1);
   };
 
   const handleClose = async () => {
@@ -541,7 +570,8 @@ export default function WorkoutScreen() {
       >
         {exercises.map((ex, i) => {
           const isCurrent = i === currentExIdx;
-          const isDone = i < currentExIdx;
+          const isDone = completedExercises.has(i);
+          const isPartial = !isDone && (exerciseSets[i] || 0) > 0;
           return (
             <TouchableOpacity
               key={`${ex.name}-${i}`}
@@ -549,6 +579,7 @@ export default function WorkoutScreen() {
                 styles.exercisePill,
                 isCurrent && styles.exercisePillActive,
                 isDone && styles.exercisePillDone,
+                isPartial && styles.exercisePillPartial,
               ]}
               onPress={() => {
                 setCurrentExIdx(i);
@@ -559,11 +590,15 @@ export default function WorkoutScreen() {
               {isDone && (
                 <MaterialIcons name="check-circle" size={14} color={colors.primary} />
               )}
+              {isPartial && (
+                <MaterialIcons name="radio-button-checked" size={14} color="rgb(251,191,36)" />
+              )}
               <Text
                 style={[
                   styles.exercisePillText,
                   isCurrent && styles.exercisePillTextActive,
                   isDone && styles.exercisePillTextDone,
+                  isPartial && styles.exercisePillTextPartial,
                 ]}
                 numberOfLines={1}
               >
@@ -935,6 +970,16 @@ export default function WorkoutScreen() {
         onClose={() => setShowExerciseDetail(false)}
       />
 
+      {/* Exercise Hub (between-exercise transition) */}
+      <ExerciseHub
+        visible={showExerciseHub}
+        exercises={exercises}
+        completedExercises={completedExercises}
+        exerciseSets={exerciseSets}
+        suggestedNextIdx={suggestedNextIdx}
+        onSelectExercise={handleExerciseHubSelect}
+      />
+
       {/* Begin Set Modal (alarm dismiss) */}
       <BeginSetModal
         visible={alarmFired}
@@ -942,6 +987,7 @@ export default function WorkoutScreen() {
         setNumber={currentSet}
         totalSets={totalSets}
         isLastSet={currentSet >= totalSets && currentExIdx >= exercises.length - 1}
+        isExerciseTransition={currentSet >= totalSets && currentExIdx < exercises.length - 1}
         onBeginSet={handleBeginSet}
         onExtend={handleExtendRest}
       />
@@ -1072,11 +1118,15 @@ const styles = StyleSheet.create({
   exercisePillDone: {
     backgroundColor: 'rgba(212,255,0,0.1)', borderColor: 'rgba(212,255,0,0.2)',
   },
+  exercisePillPartial: {
+    backgroundColor: 'rgba(251,191,36,0.08)', borderColor: 'rgba(251,191,36,0.25)',
+  },
   exercisePillText: {
     fontSize: 12, fontFamily: 'Inter_500Medium', color: colors.textMuted, maxWidth: 120,
   },
   exercisePillTextActive: { color: colors.bgDark, fontFamily: 'Inter_700Bold' },
   exercisePillTextDone: { color: colors.primary },
+  exercisePillTextPartial: { color: 'rgb(251,191,36)' },
 
   // Main content
   mainScroll: { flex: 1 },
