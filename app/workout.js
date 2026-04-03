@@ -50,7 +50,6 @@ export default function WorkoutScreen() {
   const [reps, setReps] = useState(targetReps);
   const [pushSuggestion, setPushSuggestion] = useState(null);
   const [inputText, setInputText] = useState('');
-  const [isInputMode, setIsInputMode] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -785,9 +784,15 @@ export default function WorkoutScreen() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.voiceBar}>
-          {/* AI Response Bubble */}
+          {/* Coach Response */}
           {(aiResponse || isAiLoading) && (
             <View style={styles.aiResponseContainer}>
+              <View style={styles.aiResponseHeader}>
+                <View style={styles.aiResponseAvatar}>
+                  <MaterialIcons name="bolt" size={12} color={colors.bgDark} />
+                </View>
+                <Text style={styles.aiResponseLabel}>AURA</Text>
+              </View>
               {isAiLoading ? (
                 <View style={styles.aiLoadingRow}>
                   <ActivityIndicator size="small" color={colors.primary} />
@@ -799,53 +804,37 @@ export default function WorkoutScreen() {
             </View>
           )}
 
-          {/* Input Row */}
-          {isInputMode ? (
-            <View style={styles.voiceBarInner}>
-              <TextInput
-                ref={inputRef}
-                style={styles.chatInput}
-                placeholder="Ask your coach..."
-                placeholderTextColor="rgba(255,255,255,0.3)"
-                value={inputText}
-                onChangeText={setInputText}
-                onSubmitEditing={handleSend}
-                returnKeyType="send"
-                autoFocus
-                onBlur={() => { if (!inputText.trim()) setIsInputMode(false); }}
-              />
-              <TouchableOpacity
-                onPress={handleSend}
-                disabled={isAiLoading || !inputText.trim()}
-                style={styles.sendButton}
-              >
-                {isAiLoading ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <MaterialIcons
-                    name="send"
-                    size={20}
-                    color={inputText.trim() ? colors.primary : 'rgba(212,255,0,0.3)'}
-                  />
-                )}
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity
-              style={styles.voiceBarInner}
-              onPress={() => {
-                setAiResponse(null);
-                setIsInputMode(true);
-              }}
-              activeOpacity={0.7}
-            >
-              <View style={styles.micIcon}>
-                <MaterialIcons name="mic" size={18} color={colors.bgDark} />
-              </View>
-              <Text style={styles.voicePrompt}>"Ready for the next set?"</Text>
-              <MaterialIcons name="keyboard" size={20} color="rgba(212,255,0,0.3)" />
+          {/* Always-Visible Chat Input */}
+          <View style={styles.voiceBarInner}>
+            <TextInput
+              ref={inputRef}
+              style={styles.chatInput}
+              placeholder="Ask your coach..."
+              placeholderTextColor="rgba(212,255,0,0.35)"
+              value={inputText}
+              onChangeText={setInputText}
+              onSubmitEditing={handleSend}
+              returnKeyType="send"
+            />
+            <TouchableOpacity style={styles.micButton}>
+              <MaterialIcons name="mic" size={20} color={colors.textMuted} />
             </TouchableOpacity>
-          )}
+            <TouchableOpacity
+              onPress={handleSend}
+              disabled={isAiLoading || !inputText.trim()}
+              style={[styles.sendButton, inputText.trim() && styles.sendButtonActive]}
+            >
+              {isAiLoading ? (
+                <ActivityIndicator size="small" color={colors.bgDark} />
+              ) : (
+                <MaterialIcons
+                  name="send"
+                  size={18}
+                  color={inputText.trim() ? colors.bgDark : 'rgba(212,255,0,0.3)'}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
 
@@ -1160,38 +1149,51 @@ const styles = StyleSheet.create({
   },
   skipRestText: { fontSize: 13, fontFamily: 'Inter_700Bold', color: colors.primary, letterSpacing: 2 },
 
-  // Voice bar
+  // Coaching zone
   voiceBar: {
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm, paddingBottom: spacing.lg,
-    borderTopWidth: 1, borderTopColor: 'rgba(212,255,0,0.2)',
-    backgroundColor: 'rgba(18,20,8,0.9)',
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.lg,
+    borderTopWidth: 1.5, borderTopColor: 'rgba(212,255,0,0.2)',
+    backgroundColor: 'rgba(18,20,8,0.95)',
   },
   voiceBarInner: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
-    backgroundColor: '#1c1f0d', borderRadius: radius.full,
-    paddingHorizontal: spacing.md, paddingVertical: spacing.sm,
-    borderWidth: 1, borderColor: 'rgba(212,255,0,0.1)',
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
+    backgroundColor: 'rgba(212,255,0,0.06)', borderRadius: radius.full,
+    paddingLeft: spacing.md, paddingRight: 6, paddingVertical: 6,
+    borderWidth: 1.5, borderColor: 'rgba(212,255,0,0.25)',
   },
-  micIcon: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
-  },
-  voicePrompt: { flex: 1, fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic' },
-  chatInput: {
-    flex: 1, fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary,
-    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
-  },
-  sendButton: {
+  micButton: {
     width: 36, height: 36, borderRadius: 18,
     justifyContent: 'center', alignItems: 'center',
   },
+  chatInput: {
+    flex: 1, fontSize: 15, fontFamily: 'Inter_400Regular', color: colors.textPrimary,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 6,
+  },
+  sendButton: {
+    width: 40, height: 40, borderRadius: 20,
+    justifyContent: 'center', alignItems: 'center',
+    backgroundColor: 'rgba(212,255,0,0.1)',
+  },
+  sendButtonActive: {
+    backgroundColor: colors.primary,
+  },
   aiResponseContainer: {
-    backgroundColor: 'rgba(212,255,0,0.08)', borderRadius: radius.md,
-    borderWidth: 1, borderColor: 'rgba(212,255,0,0.15)',
-    padding: spacing.sm, marginBottom: spacing.xs,
+    backgroundColor: 'rgba(212,255,0,0.08)', borderRadius: radius.lg,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.2)',
+    padding: spacing.md, marginBottom: spacing.sm,
+  },
+  aiResponseHeader: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs,
+  },
+  aiResponseAvatar: {
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
+  },
+  aiResponseLabel: {
+    fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.primary, letterSpacing: 1.5,
   },
   aiResponseText: {
-    fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textPrimary, lineHeight: 19,
+    fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary, lineHeight: 21,
   },
   aiLoadingRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,

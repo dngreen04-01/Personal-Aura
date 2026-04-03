@@ -390,7 +390,7 @@ export default function ChatScreen() {
               <TextInput
                 ref={inputRef}
                 style={styles.input}
-                placeholder="Type a message or ask Aura..."
+                placeholder="Message Aura..."
                 placeholderTextColor={colors.textMuted}
                 value={inputText}
                 onChangeText={setInputText}
@@ -488,14 +488,15 @@ const styles = StyleSheet.create({
   },
   regenBannerLoadingText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
 
-  // Input
-  inputArea: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
+  // Input — coaching zone
+  inputArea: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderTopWidth: 1.5, borderTopColor: 'rgba(212,255,0,0.2)', backgroundColor: 'rgba(18,20,8,0.5)' },
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   inputWrapper: { flex: 1, position: 'relative' },
   input: {
-    backgroundColor: colors.primaryGhost, borderRadius: radius.full,
+    backgroundColor: 'rgba(212,255,0,0.06)', borderRadius: radius.full,
     paddingHorizontal: spacing.lg, paddingVertical: 14, paddingRight: 48,
-    color: colors.textPrimary, fontSize: 14, fontFamily: 'Inter_400Regular',
+    color: colors.textPrimary, fontSize: 15, fontFamily: 'Inter_400Regular',
+    borderWidth: 1.5, borderColor: 'rgba(212,255,0,0.25)',
   },
   micInInput: { position: 'absolute', right: 12, top: 0, bottom: 0, justifyContent: 'center' },
   sendButton: { width: 48, height: 48, borderRadius: 24, backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center' },
