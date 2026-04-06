@@ -124,6 +124,23 @@ Please generate a ${daysPerWeek}-day workout split in JSON. IMPORTANT: Every exe
     }
   }
 
+  // Derive blocks from exercises (all onboarding plans are strength-only)
+  if (Array.isArray(plan)) {
+    for (const day of plan) {
+      if (Array.isArray(day.exercises) && !day.blocks) {
+        day.blocks = day.exercises.map((ex, i) => ({
+          block_type: 'strength',
+          label: ex.name,
+          config: {
+            exercise: ex.name,
+            target_sets: parseInt(ex.sets) || 3,
+            target_reps: ex.reps || '8-10',
+          },
+        }));
+      }
+    }
+  }
+
   console.log('[Onboarding] Plan generated with', plan.length, 'days,',
     plan.reduce((sum, d) => sum + (d.exercises?.length || 0), 0), 'total exercises');
 

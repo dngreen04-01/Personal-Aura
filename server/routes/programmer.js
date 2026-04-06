@@ -2,6 +2,7 @@ const express = require('express');
 const { handlePlanRegeneration } = require('../agents/planning');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { getUserProfile, getUserActivePlan, getUserSessions, getSessionSets, saveNewPlan } = require('../services/firestore');
+const { validateBlockPlan } = require('../../lib/validateBlockPlan');
 const router = express.Router();
 
 // Submit a plan regeneration job — delegates to Planning Agent
@@ -64,7 +65,63 @@ router.post('/submit', asyncHandler(async (req, res) => {
       }
     }
 
-    const result = await handlePlanRegeneration({ userProfile, currentPlan, workoutHistory, schedule });
+    let result;
+    let retries = 0;
+    const MAX_RETRIES = 2;
+
+    while (retries <= MAX_RETRIES) {
+      result = await handlePlanRegeneration({ userProfile, currentPlan, workoutHistory, schedule });
+
+      // Validate blocks in each day of the plan
+      let allValid = true;
+      if (result.plan) {
+        for (const day of result.plan) {
+          if (day.blocks && day.blocks.length > 0) {
+            const validation = validateBlockPlan({ blocks: day.blocks });
+            if (!validation.valid) {
+              console.error(JSON.stringify({
+                severity: 'WARNING',
+                message: 'Block validation failed in plan regeneration',
+                day: day.day,
+                errors: validation.errors,
+                attempt: retries + 1,
+              }));
+              allValid = false;
+              break;
+            }
+            // Use normalized blocks
+            day.blocks = validation.normalized.blocks;
+          }
+
+          // Derive exercises from strength blocks if not provided by AI
+          if (day.blocks && (!day.exercises || day.exercises.length === 0)) {
+            day.exercises = day.blocks
+              .filter(b => b.block_type === 'strength')
+              .map(b => ({
+                name: b.config.exercise || b.label,
+                sets: b.config.target_sets || 3,
+                reps: b.config.target_reps || '8-10',
+                targetWeight: b.config.target_weight || '0kg',
+                restSeconds: b.config.rest_seconds || 90,
+              }));
+          }
+        }
+      }
+
+      if (allValid) break;
+      retries++;
+      if (retries > MAX_RETRIES) {
+        console.error(JSON.stringify({
+          severity: 'ERROR',
+          message: 'Block validation failed after max retries, using plan without blocks',
+        }));
+        // Strip invalid blocks, keep exercises
+        for (const day of result.plan) {
+          if (day.blocks) delete day.blocks;
+        }
+        break;
+      }
+    }
 
     // Save new plan to Firestore
     if (uid && result.plan) {

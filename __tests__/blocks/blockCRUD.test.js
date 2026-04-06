@@ -2,7 +2,7 @@
  * blockCRUD.test.js — CRUD on session_blocks and block_entries.
  * Phase 0: raw SQL tests. Phase 1: helper function tests added below.
  */
-const { getDatabase, closeDatabase, createSessionBlock, logBlockEntry, getSessionBlocks, getBlockEntries, createBlocksFromPlan, logStrengthSet } = require('../../lib/database');
+const { getDatabase, closeDatabase, createSessionBlock, logBlockEntry, getSessionBlocks, getBlockEntries, createBlocksFromPlan, logStrengthSet, logTimedEffort, logRoundEntry } = require('../../lib/database');
 
 function uid() { return `crud_${Math.random().toString(36).slice(2)}`; }
 
@@ -225,5 +225,70 @@ describe('logStrengthSet dual-write', () => {
 
     const sets = await db.getAllAsync('SELECT * FROM workout_sets WHERE session_id = ?', [sid]);
     expect(sets).toHaveLength(1);
+  });
+});
+
+// --- Phase 2: Timer/round entry logging helpers ---
+
+describe('Timer and round entry logging helpers', () => {
+  afterEach(async () => { await closeDatabase(); });
+
+  it('logTimedEffort writes a timed_effort entry with context', async () => {
+    const db = await getDatabase(uid());
+    const sess = await db.runAsync(
+      "INSERT INTO workout_sessions (plan_day, focus) VALUES (?, ?)", [1, 'hiit']
+    );
+    const blockId = await createSessionBlock(sess.lastInsertRowId, 0, 'interval', 'HIIT', {
+      work_sec: 30, rest_sec: 15, rounds: 8,
+    });
+
+    const entryId = await logTimedEffort(blockId, 0, 30, { round: 1, phase: 'work' });
+    expect(entryId).toBeGreaterThan(0);
+
+    const entries = await getBlockEntries(blockId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].entry_type).toBe('timed_effort');
+    const payload = JSON.parse(entries[0].payload_json);
+    expect(payload.elapsed_sec).toBe(30);
+    expect(payload.round).toBe(1);
+    expect(payload.phase).toBe('work');
+  });
+
+  it('logRoundEntry writes a round entry with movements', async () => {
+    const db = await getDatabase(uid());
+    const sess = await db.runAsync(
+      "INSERT INTO workout_sessions (plan_day, focus) VALUES (?, ?)", [1, 'amrap']
+    );
+    const blockId = await createSessionBlock(sess.lastInsertRowId, 0, 'amrap', 'AMRAP 10min', {
+      time_cap_sec: 600, movements: [{ name: 'burpee', reps: 10 }],
+    });
+
+    const entryId = await logRoundEntry(blockId, 0, 1, [{ name: 'burpee', reps: 10 }]);
+    expect(entryId).toBeGreaterThan(0);
+
+    const entries = await getBlockEntries(blockId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].entry_type).toBe('round');
+    const payload = JSON.parse(entries[0].payload_json);
+    expect(payload.round).toBe(1);
+    expect(payload.movements_completed).toHaveLength(1);
+    expect(payload.movements_completed[0].name).toBe('burpee');
+  });
+
+  it('logTimedEffort works with null context', async () => {
+    const db = await getDatabase(uid());
+    const sess = await db.runAsync(
+      "INSERT INTO workout_sessions (plan_day, focus) VALUES (?, ?)", [1, 'timed']
+    );
+    const blockId = await createSessionBlock(sess.lastInsertRowId, 0, 'timed', 'Plank', {
+      duration_sec: 60,
+    });
+
+    const entryId = await logTimedEffort(blockId, 0, 45, null);
+    expect(entryId).toBeGreaterThan(0);
+
+    const entries = await getBlockEntries(blockId);
+    const payload = JSON.parse(entries[0].payload_json);
+    expect(payload.elapsed_sec).toBe(45);
   });
 });

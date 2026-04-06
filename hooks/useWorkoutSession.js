@@ -1,21 +1,55 @@
 import { useState, useEffect, useCallback } from 'react';
-import { startSession, endSession, getSessionState, getUserProfile, saveSessionState, createSessionBlock, getSessionBlocks } from '../lib/database';
+import { startSession, endSession, getSessionState, getUserProfile, saveSessionState, createSessionBlock, getSessionBlocks, createBlocksFromPlan } from '../lib/database';
+import { validateBlockPlan } from '../lib/validateBlockPlan';
 
 /**
- * Manages workout session lifecycle: create/resume session, create strength
- * blocks, persist position state, load user profile.
+ * Manages workout session lifecycle: create/resume session, create blocks
+ * (strength or mixed), persist position state, load user profile.
  *
  * Returns blockMap: { exerciseName → blockId } for dual-write in handleDone.
+ * Returns sessionBlocks: parsed block rows for block-type routing.
  */
 export default function useWorkoutSession({ day, location, startIdx, resumeSessionId, exercises }) {
   const [sessionId, setSessionId] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
   const [blockMap, setBlockMap] = useState({});
+  const [sessionBlocks, setSessionBlocks] = useState([]);
   const [currentExIdx, setCurrentExIdx] = useState(parseInt(startIdx) || 0);
   const [currentSet, setCurrentSet] = useState(1);
   const [completedExercises, setCompletedExercises] = useState(new Set());
   const [exerciseSets, setExerciseSets] = useState({});
   const [ready, setReady] = useState(false);
+
+  // --- Create blocks from a validated plan's blocks array ---
+  const createBlocksFromValidatedPlan = useCallback(async (sid, planBlocks) => {
+    // Check if blocks already exist (resume case)
+    const existing = await getSessionBlocks(sid);
+    if (existing.length > 0) {
+      const map = {};
+      for (const b of existing) {
+        const config = b.config_json ? JSON.parse(b.config_json) : {};
+        if (config.exercise) map[config.exercise] = b.id;
+      }
+      return map;
+    }
+
+    // Validate and create blocks
+    const validation = validateBlockPlan({ blocks: planBlocks });
+    if (validation.valid) {
+      const created = await createBlocksFromPlan(sid, validation.normalized);
+      const map = {};
+      for (const c of created) {
+        // Build exerciseName→blockId map for strength blocks (dual-write)
+        const block = validation.normalized.blocks.find(b => b.block_index === c.blockIndex);
+        if (block?.block_type === 'strength' && block.config?.exercise) {
+          map[block.config.exercise] = c.blockId;
+        }
+      }
+      return map;
+    }
+    // Validation failed — fall back to strength blocks from exercises
+    return {};
+  }, []);
 
   // --- Create strength blocks for each exercise ---
   const createStrengthBlocks = useCallback(async (sid, exList) => {
@@ -65,10 +99,25 @@ export default function useWorkoutSession({ day, location, startIdx, resumeSessi
         setSessionId(sid);
       }
 
-      // Create strength blocks (idempotent)
-      if (sid && exercises.length > 0) {
-        const map = await createStrengthBlocks(sid, exercises);
-        setBlockMap(map);
+      // Create blocks from plan (idempotent).
+      // If the plan has a blocks array (new plans), use it directly.
+      // Otherwise fall back to auto-creating strength blocks per exercise.
+      if (sid) {
+        const planBlocks = day?.blocks;
+        let map;
+        if (planBlocks && planBlocks.length > 0) {
+          map = await createBlocksFromValidatedPlan(sid, planBlocks);
+        } else if (exercises.length > 0) {
+          map = await createStrengthBlocks(sid, exercises);
+        }
+        if (map) setBlockMap(map);
+
+        // Load all session blocks for block-type routing
+        const rows = await getSessionBlocks(sid);
+        setSessionBlocks(rows.map(b => ({
+          ...b,
+          config: b.config_json ? JSON.parse(b.config_json) : {},
+        })));
       }
 
       try {
@@ -99,6 +148,7 @@ export default function useWorkoutSession({ day, location, startIdx, resumeSessi
     sessionId,
     userProfile,
     blockMap,
+    sessionBlocks,
     currentExIdx, setCurrentExIdx,
     currentSet, setCurrentSet,
     completedExercises, setCompletedExercises,

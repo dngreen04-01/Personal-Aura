@@ -21,6 +21,7 @@ import { evaluateSet, checkMilestone } from '../lib/motivation';
 import useRestTimer from '../hooks/useRestTimer';
 import useExerciseState from '../hooks/useExerciseState';
 import useWorkoutSession from '../hooks/useWorkoutSession';
+import BlockRouter from '../components/workout/BlockRouter';
 
 export default function WorkoutScreen() {
   const router = useRouter();
@@ -36,12 +37,16 @@ export default function WorkoutScreen() {
   // --- Session lifecycle hook ---
   const session = useWorkoutSession({ day, location, startIdx, resumeSessionId, exercises });
   const {
-    sessionId, userProfile, blockMap,
+    sessionId, userProfile, blockMap, sessionBlocks,
     currentExIdx, setCurrentExIdx,
     currentSet, setCurrentSet,
     completedExercises, setCompletedExercises,
     exerciseSets, setExerciseSets,
   } = session;
+
+  // Determine if current block is non-strength (needs adapter routing)
+  const currentBlock = sessionBlocks[currentExIdx] || null;
+  const isStrengthBlock = !currentBlock || currentBlock.block_type === 'strength';
 
   const currentExercise = exercises[currentExIdx];
   const totalSets = parseInt(currentExercise?.sets) || 4;
@@ -290,7 +295,7 @@ export default function WorkoutScreen() {
     router.back();
   };
 
-  if (!day || !currentExercise) {
+  if (!day || (!currentExercise && isStrengthBlock)) {
     return (
       <SafeAreaView style={styles.container}>
         <Text style={{ color: colors.textPrimary, textAlign: 'center', marginTop: 100 }}>No workout data</Text>
@@ -314,14 +319,18 @@ export default function WorkoutScreen() {
         </TouchableOpacity>
         <View style={styles.headerCenter}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={styles.headerTitle}>{currentExercise.name}</Text>
-            {libraryExercise && (
+            <Text style={styles.headerTitle}>{isStrengthBlock ? currentExercise?.name : (currentBlock?.label || currentBlock?.block_type)}</Text>
+            {isStrengthBlock && libraryExercise && (
               <TouchableOpacity onPress={() => setShowExerciseDetail(true)} hitSlop={8}>
                 <MaterialIcons name="info-outline" size={18} color={colors.primaryDim} />
               </TouchableOpacity>
             )}
           </View>
-          <Text style={styles.headerSub}>SET {currentSet} OF {totalSets}{location?.name ? ` \u00B7 ${location.name}` : ''}</Text>
+          <Text style={styles.headerSub}>
+            {isStrengthBlock
+              ? `SET ${currentSet} OF ${totalSets}${location?.name ? ` \u00B7 ${location.name}` : ''}`
+              : `${currentBlock?.block_type?.toUpperCase() || ''}${location?.name ? ` \u00B7 ${location.name}` : ''}`}
+          </Text>
         </View>
         <TouchableOpacity style={styles.headerSide}>
           <View style={styles.settingsButton}>
@@ -357,20 +366,21 @@ export default function WorkoutScreen() {
         </View>
       </View>
 
-      {/* Exercise List */}
+      {/* Exercise / Block List */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         style={styles.exerciseStrip}
         contentContainerStyle={styles.exerciseStripContent}
       >
-        {exercises.map((ex, i) => {
+        {(exercises.length > 0 ? exercises : sessionBlocks).map((item, i) => {
           const isCurrent = i === currentExIdx;
           const isDone = completedExercises.has(i);
           const isPartial = !isDone && (exerciseSets[i] || 0) > 0;
+          const pillLabel = item.name || item.label || item.block_type || `Block ${i + 1}`;
           return (
             <TouchableOpacity
-              key={`${ex.name}-${i}`}
+              key={`${pillLabel}-${i}`}
               style={[
                 styles.exercisePill,
                 isCurrent && styles.exercisePillActive,
@@ -394,7 +404,7 @@ export default function WorkoutScreen() {
                 ]}
                 numberOfLines={1}
               >
-                {ex.name}
+                {pillLabel}
               </Text>
             </TouchableOpacity>
           );
@@ -402,6 +412,29 @@ export default function WorkoutScreen() {
       </ScrollView>
 
       {/* Main Content */}
+      {!isStrengthBlock ? (
+        /* Non-strength block: render the appropriate adapter via BlockRouter */
+        <View style={styles.mainScroll}>
+          <BlockRouter
+            block={currentBlock}
+            sessionId={sessionId}
+            blockPosition={`Block ${currentExIdx + 1} of ${exercises.length || sessionBlocks.length}`}
+            onBlockComplete={() => {
+              setCompletedExercises(prev => new Set(prev).add(currentExIdx));
+              if (currentExIdx < (exercises.length || sessionBlocks.length) - 1) {
+                setShowExerciseHub(true);
+              } else {
+                (async () => {
+                  if (sessionId) await endSession(sessionId);
+                  const stats = sessionId ? await getSessionStats(sessionId) : null;
+                  setCompleteStats(stats);
+                  setShowComplete(true);
+                })();
+              }
+            }}
+          />
+        </View>
+      ) : (
       <ScrollView style={styles.mainScroll} contentContainerStyle={styles.mainContent}>
         {isResting ? (
           <View style={styles.restContainer}>
@@ -575,6 +608,7 @@ export default function WorkoutScreen() {
           </>
         )}
       </ScrollView>
+      )}
 
       {/* Bottom Voice Bar */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>

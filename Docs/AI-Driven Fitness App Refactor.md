@@ -198,9 +198,72 @@ Before Phase 1 feature code is written, a comprehensive 7-file test harness must
 
 6. **Styles account for ~600 of workout.js's 1,096 total lines.** The PRD target of <500 lines refers to component logic. Styles were not extracted because React Native `StyleSheet.create()` objects are not shareable across files without a shared module, and the styles are tightly coupled to this screen's layout. A future cleanup pass could extract shared patterns (adjustCard, pushBanner) into a theme extension.
 
-* **Phase 2: Timers & Interval Adapters (1-2 Weeks)**  
+* **Phase 2: Timers & Interval Adapters (1-2 Weeks)** ✅ COMPLETED 2026-04-06  
   * Implement IntervalTimer and TimerInput components.  
-  * Update the Planning Agent to generate block-level plans.  
+  * Update the Planning Agent to generate block-level plans.
+
+### Phase 2 Delivery Log
+
+**Timer Core (`hooks/useTimerCore.js` — new file)**
+* Pure countdown/countup engine: 250ms tick loop, absolute end-time reference (drift-resistant), AppState foreground recalculation, pause/resume with remaining-time preservation.
+* `restoreFromEndTime()` for app-kill recovery — returns true if still active, false if expired.
+* Callback refs (`onCompleteRef`, `onTickRef`) avoid stale closure issues.
+* `useRestTimer` left untouched — timer core is standalone, not a refactor. Zero regression risk.
+
+**Timer Hooks (`hooks/` — 3 new files)**
+* `useIntervalTimer.js` — work/rest phase cycling with round counter. State machine: IDLE→WORK→REST→...→COMPLETE. SQLite persistence via `saveBlockTimer()` with `timer_kind='interval'`. Phase-aware notifications. App-kill recovery. Notifee action handler for Continue/+15s.
+* `useAMRAPTimer.js` — count-down from `time_cap_sec`. Manual `logRound()` button increments counter and writes `round` entries. Persists round count across app kills.
+* `useEMOMTimer.js` — per-minute countdown with auto-advance. Logs `timed_effort` per completed minute. Auto-starts next minute on completion.
+
+**UI Components (`components/workout/` — 6 new files)**
+* `TimerDisplay.js` — shared `MM:SS` display at 56pt with phase-aware coloring (lime for work, gray for rest). `fontVariant: ['tabular-nums']` prevents digit-width jitter.
+* `IntervalAdapter.js` — renders inside `BlockAdapterShell` with `keepAwake={true}`. Shows round counter, phase chip (WORK/REST), and countdown. Primary action: START → SKIP WORK/SKIP REST → (TransitionModal).
+* `AMRAPAdapter.js` — countdown timer + manual round counter. Primary action: START → LOG ROUND. Round count displayed prominently below timer.
+* `EMOMAdapter.js` — per-minute countdown with movement list. Primary action: START → PAUSE/RESUME. Movements from config displayed below timer.
+* `BlockRouter.js` — routes `block_type` to correct adapter: `strength` → existing inline UI, `interval` → IntervalAdapter, `amrap` → AMRAPAdapter, `emom` → EMOMAdapter, unknown → UnsupportedBlockFallback.
+* `UnsupportedBlockFallback.js` — graceful fallback for unimplemented block types with SKIP action.
+
+**Wake Lock**
+* `expo-keep-awake` installed and wired into `BlockAdapterShell.js`. Replaces Phase 0 stub. `activateKeepAwakeAsync('block-timer')` / `deactivateKeepAwake('block-timer')` via conditional `useEffect`. Strength blocks pass `keepAwake={false}`, timer blocks pass `keepAwake={true}`.
+
+**Notification Generalization (`lib/notifications.js`)**
+* `showBlockTimerNotification(label, totalSeconds, timerId, phase)` — persistent countdown with dynamic title ("Work Phase" / "Rest Phase").
+* `fireBlockAlarm(label, timerId)` — immediate alarm with "Continue" / "+15s" action buttons.
+* `dismissBlockTimerNotification()` — cleanup on phase transition.
+* iOS notification category `'block-timer'` with Continue/+15s actions.
+* Existing `rest-timer`/`rest-alarm` channels untouched.
+
+**Database Helpers (`lib/database.js` — 4 new exports)**
+* `saveBlockTimer(endTime, sessionId, timerKind, contextJson)` — writes to `active_rest_timer` with `timer_kind` + `context_json` columns.
+* `getActiveBlockTimer()` — reads row with parsed `context` field.
+* `logTimedEffort(blockId, entryIndex, elapsedSec, contextJson)` — thin wrapper for `timed_effort` entries.
+* `logRoundEntry(blockId, entryIndex, roundNum, movementsCompleted)` — thin wrapper for `round` entries.
+
+**Session Integration**
+* `useWorkoutSession.js` extended: checks for `day.blocks` array (new plans), calls `createBlocksFromPlan()` with validation. Falls back to `createStrengthBlocks()` for legacy plans. Exposes `sessionBlocks` with parsed configs.
+* `workout.js` integrated: imports `BlockRouter`, derives `currentBlock` and `isStrengthBlock`. Non-strength blocks render via `BlockRouter` instead of inline strength UI. Header and exercise strip handle block labels. Null-safety for non-strength blocks without matching exercises.
+
+**Planning Agent (`server/agents/planning.js`)**
+* `handlePlanRegeneration()` system prompt updated: output schema now includes `blocks` array alongside `exercises`. Block type reference section added (strength, interval, cardio, rest).
+* `handleWorkoutModification()` workoutCard schema updated with `blocks` field.
+* `server/routes/programmer.js`: `validateBlockPlan()` wired with 2-retry loop. Invalid blocks stripped on final failure. `exercises` derived from strength blocks when not provided by AI.
+* `server/routes/onboarding.js`: blocks derived from exercises in post-processing (onboarding is always strength-only).
+
+**Tests (8 new tests, 161 total)**
+* `blockCRUD.test.js`: `logTimedEffort` with context, `logRoundEntry` with movements, null-context handling.
+* `active_timer.test.js`: `saveBlockTimer`/`getActiveBlockTimer` roundtrip, context parsing, overwrite behavior, `clearRestTimer` compatibility, empty-table null return.
+* Full suite: **161 tests passing, 0 regressions.**
+
+### Phase 2 Discovery Notes
+
+1. **`useTimerCore` left standalone, not refactored into `useRestTimer`.** The rest timer (207 lines) is production-proven with complex alarm/notification/modal behavior. Refactoring it to use `useTimerCore` would risk regressions for zero user-visible benefit. `useTimerCore` is proven through the new timer hooks instead. If rest timer needs changes in a future phase, the refactor can happen then with a clear diff to review.
+
+2. **`BlockRouter` preserves inline strength UI.** The current workout.js has a rich strength experience (weight/reps adjusters, RPE slider, push suggestions, exercise images, estimated weight banners) that far exceeds `StrengthAdapter`'s simplified scaffold. `BlockRouter` only activates for non-strength blocks, keeping the full strength UX intact. Migrating strength to `StrengthAdapter` would require backporting all adjuster, RPE, and AI features — that's a separate cleanup task, not Phase 2 scope.
+
+3. **Planning Agent transition period.** Both `blocks` and `exercises` are output simultaneously. `exercises` is derived deterministically from strength blocks in the route handler (not AI-generated), preventing mismatch. `useWorkoutSession` checks for `blocks` first, falls back to `exercises`. No Firestore migration needed — existing flat plans continue working via the `createStrengthBlocks` path.
+
+4. **Notification channel reuse.** Block timer countdown notifications reuse the existing `rest-timer` Android channel (low importance, persistent) rather than creating a new channel. Only the alarm channel needs to be distinct for action button differences (Continue vs Begin Set). iOS uses a separate `block-timer` notification category.
+
 * **Phase 3: Async Generation via Flex API (1 Week)**  
   * Implement the asynchronous 202 Accepted polling pattern for the POST /api/programmer/submit route.
 

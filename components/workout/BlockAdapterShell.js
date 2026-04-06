@@ -21,15 +21,14 @@
  */
 import { useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { colors, spacing, radius, fonts } from '../../lib/theme';
 
-// Local wake-lock stub. When expo-keep-awake is added (Phase 2), replace with:
-//   import { useKeepAwake } from 'expo-keep-awake';
-function useKeepAwakeStub(active) {
+function useKeepAwakeConditional(active) {
   useEffect(() => {
     if (!active) return undefined;
-    // No-op in Phase 0. Phase 2 will wire expo-keep-awake here.
-    return () => {};
+    activateKeepAwakeAsync('block-timer');
+    return () => deactivateKeepAwake('block-timer');
   }, [active]);
 }
 
@@ -43,7 +42,7 @@ export default function BlockAdapterShell({
   keepAwake = false,  // true for timer-based blocks
   accessibilityHint,
 }) {
-  useKeepAwakeStub(keepAwake);
+  useKeepAwakeConditional(keepAwake);
 
   return (
     <View style={styles.container} accessible accessibilityRole="none">

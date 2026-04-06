@@ -253,6 +253,9 @@ You MUST respond with valid JSON matching this exact schema:
   "text": "Brief confirmation message referencing recent training (1-2 sentences)",
   "workoutCard": {
     "focus": "Updated focus label",
+    "blocks": [
+      { "block_type": "strength", "label": "Exercise Name", "config": { "exercise": "Exercise Name", "target_sets": 3, "target_reps": "8-10" } }
+    ],
     "exercises": [{ "name": "Exercise Name", "sets": 3, "reps": "8-10", "targetWeight": "40kg", "isEstimated": false, "restSeconds": 90 }],
     "estimatedDuration": 45,
     "modificationType": "${modificationType}"
@@ -315,6 +318,10 @@ You MUST respond with valid JSON matching this exact schema:
     {
       "day": "Monday",
       "focus": "Push (Chest, Shoulders, Triceps)",
+      "blocks": [
+        { "block_type": "strength", "label": "Bench Press", "config": { "exercise": "Bench Press", "target_sets": 3, "target_reps": "8-10" } },
+        { "block_type": "strength", "label": "Incline Dumbbell Press", "config": { "exercise": "Incline Dumbbell Press", "target_sets": 3, "target_reps": "10-12" } }
+      ],
       "exercises": [
         { "name": "Bench Press", "sets": 3, "reps": "8-10", "targetWeight": "82.5kg", "restSeconds": 90 },
         { "name": "Incline Dumbbell Press", "sets": 3, "reps": "10-12", "targetWeight": "30kg", "isEstimated": true, "restSeconds": 90 }
@@ -324,7 +331,16 @@ You MUST respond with valid JSON matching this exact schema:
   "changes": [
     "Bench Press: Weight increased from 80kg to 82.5kg (avg RPE 6.5, consistently hitting 10 reps)"
   ]
-}`;
+}
+
+Block type reference:
+- "strength": weight-based exercise. config requires: exercise (string), target_sets (integer >= 1), target_reps (string or integer).
+- "interval": work/rest cycles. config requires: work_sec (integer > 0), rest_sec (integer >= 0), rounds (integer >= 1).
+- "cardio": cardio modality. config requires: modality (string), and either duration_sec (integer > 0) or target_distance_m (integer > 0).
+- "rest": recovery. config requires: duration_sec (integer > 0).
+
+For pure strength programs, every exercise becomes a strength block. For mixed programs (HIIT, conditioning), use the appropriate block type.
+The "exercises" array MUST contain one entry per strength block for backward compatibility.`;
 
   const prompt = `User Profile:
 - Goal: ${userProfile?.goal || 'Unknown'}
