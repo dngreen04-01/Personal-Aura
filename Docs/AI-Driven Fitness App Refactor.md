@@ -269,7 +269,75 @@ Before Phase 1 feature code is written, a comprehensive 7-file test harness must
 
   * Serve users a provisional plan while the Flex API processes the full request.
 
-* **Phase 4: Goal Elicitation & Modality Expansion (2 Weeks)**  
+* **Phase 4: Goal Elicitation & Modality Expansion (2 Weeks)** ✅ COMPLETED 2026-04-06  
   * Launch the gemini-3.1-flash-lite-preview onboarding conversational UI.
 
   * Add remaining UI adapters (CircuitTracker, AMRAPTimer, DistanceInput) to support all targeted family members.
+
+### Phase 4 Delivery Log
+
+**Database Helpers (`lib/database.js` — 2 new exports)**
+* `logDistanceEffort(blockId, entryIndex, distanceM, elapsedSec, contextJson)` — thin wrapper for `distance_effort` entries.
+* `logRestEntry(blockId, entryIndex, durationSec)` — thin wrapper for `rest` entries.
+* `saveUserProfile()` extended with optional `goalsJson`, `stylePreferencesJson`, `sportContextJson`, `injuriesJson` parameters. Backward-compatible — existing callers unaffected.
+
+**Circuit Timer Hook (`hooks/useCircuitTimer.js` — new file)**
+* State machine: IDLE → ACTIVE(station, round) → COMPLETE. Handles both timed stations (auto-advance via `useTimerCore` countdown) and rep-based stations (manual `advanceStation()` tap).
+* `saveBlockTimer()` with `timer_kind='circuit'`, context stores station/round position for app-kill recovery.
+* Logs `logRoundEntry()` per completed circuit round, `logTimedEffort()` per completed timed station.
+* Notification integration via `showBlockTimerNotification()` for timed stations.
+
+**Block Adapters (`components/workout/` — 5 new files)**
+* `CircuitAdapter.js` — station name + reps/duration hero, station/round counters, START → STATION COMPLETE / SKIP STATION.
+* `TimedAdapter.js` — countdown via `useTimerCore` inline (no custom hook), START → PAUSE/RESUME → auto-complete. Logs `logTimedEffort()`.
+* `DistanceAdapter.js` — manual distance + optional time input, LOG DISTANCE → `logDistanceEffort()`. No timer, `keepAwake=false`.
+* `CardioAdapter.js` — dual-mode: duration (countdown timer) or distance (manual input). Modality-aware labels (Run/Row/Bike/Ski). Logs `logTimedEffort()` or `logDistanceEffort()` depending on mode.
+* `RestAdapter.js` — passive countdown via `useTimerCore`, gray rest-phase coloring, START REST → SKIP REST. Logs `logRestEntry()` with actual elapsed time. `timer_kind='rest_block'` distinct from set-level rest.
+
+**BlockRouter (`components/workout/BlockRouter.js`)**
+* Extended with 5 new switch cases: `circuit`, `timed`, `distance`, `cardio`, `rest`. All 9 canonical block types now have adapter coverage (strength handled inline in workout.js, 8 others via BlockRouter). `UnsupportedBlockFallback` only fires for truly unknown types.
+
+**Planning Agent (`server/agents/planning.js`)**
+* Block type reference expanded from 4 to all 9 canonical types in both `handlePlanRegeneration()` and `handleWorkoutModification()` system prompts. Includes config schemas for circuit (stations + rounds), amrap (time_cap + movements), emom (minutes + movements), timed (duration), distance (target_distance), and full cardio (modality + duration/distance).
+
+**Goal Elicitation Agent (`server/agents/elicitation.js` — new file)**
+* `handleElicitationTurn(message, history)` — multi-turn Gemini Flash-Lite conversation with `extract_goals` function calling declaration.
+* System prompt guides 3-5 question natural conversation about goals, experience, injuries, style preferences, sport context.
+* Classification taxonomy: 7 primary goals, 6 modalities, 6 styles.
+* `extract_goals` function schema: `{ goals, injuries, sport_context, style_preferences, confirmation_message }`.
+* Minimum 3-question guard before extraction. Returns `{ text, extractedData, isComplete }`.
+
+**Onboarding API (`server/routes/onboarding.js` — 2 new endpoints)**
+* `POST /api/onboarding/elicit` — single conversational turn. Input: `{ message, history }`. Output: `{ text, extractedData?, isComplete }`. Delegates to elicitation agent.
+* `POST /api/onboarding/generate` — multi-modality plan generation. Input: full taxonomy + baselines + schedule. System prompt maps goals/modalities to appropriate block types (strength, circuit, cardio, distance, interval, etc.). `validateBlockPlan()` wired with 2-retry loop. Falls back to strength-only blocks if validation exhausts retries. Firestore persistence tagged `'onboarding_v2'`.
+* Existing `POST /api/onboarding` endpoint untouched for backward compatibility.
+
+**Client API (`lib/api.js` — 2 new exports)**
+* `sendElicitationMessage(message, history)` — POST to `/api/onboarding/elicit`, 30s timeout.
+* `generateMultiModalityPlan(profile)` — POST to `/api/onboarding/generate`, 90s timeout.
+
+**Onboarding UI (`app/onboarding.js`)**
+* Initial step changed from `goal` (static buttons) to `elicitation` (free-text chat). Opening message: "Hey! I'm Aura, your new coach. Tell me about your fitness goals — what are you training for?"
+* Text input enabled during `elicitation` step with send button. Disabled during structured widget steps (equipment, bodyStats, schedule, assessment).
+* Each user message sent to `/api/onboarding/elicit` with full chat history. Aura responses rendered as bubbles in the message thread.
+* On `isComplete`: goal confirmation card shown with extracted primary goal, modalities, sport context, injuries. "Looks good!" button advances to equipment step.
+* On API error: graceful fallback to legacy goal buttons with "No worries — let's do this the quick way instead."
+* `handleFinishAssessment()` branches: if `elicitedData` exists, calls `generateMultiModalityPlan()`; otherwise falls back to legacy `generatePlan()`.
+* `saveUserProfile()` now passes `goalsJson`, `stylePreferencesJson`, `sportContextJson`, `injuriesJson` from elicited data.
+* New state: `chatInput`, `chatHistory`, `elicitedData`, `isElicitating`, `elicitationFailed`.
+
+**Tests (3 new tests, 164 total)**
+* `blockCRUD.test.js`: `logDistanceEffort` with context and null context, `logRestEntry` with duration.
+* Full suite: **164 tests passing, 0 regressions.**
+
+### Phase 4 Discovery Notes
+
+1. **`useCircuitTimer` handles mixed station types within a single circuit.** Stations can freely mix timed (auto-advance) and rep-based (manual advance) within the same circuit block. The hook checks `station.duration_sec > 0` on each station transition to decide whether to start the timer or wait for manual tap. This flexibility supports Hyrox-style circuits where some stations are timed (e.g., 500m row) and others are rep-based (e.g., 10 wall balls).
+
+2. **`RestAdapter` uses `timer_kind='rest_block'` to avoid collision with set-level rest.** The existing `active_rest_timer` table uses `timer_kind='rest'` for between-set rest managed by `useRestTimer`. Block-level rest (a standalone rest block in the workout plan) uses `'rest_block'` for distinct recovery behavior. Both can coexist without interference.
+
+3. **CardioAdapter is dual-mode, not two separate adapters.** The `validateBlockPlan` config schema allows cardio blocks with either `duration_sec`, `target_distance_m`, or both. A single adapter with internal mode selection prevents component proliferation and matches the schema's flexibility. Duration mode uses countdown timer; distance mode uses manual input.
+
+4. **Elicitation-to-legacy goal mapping preserves backward compatibility.** When elicitation extracts `primary: 'hypertrophy'`, it maps to `selectedGoal = 'build_muscle'` for the legacy `saveUserProfile(goal)` string field. The canonical taxonomy is stored separately in `goals_json`. This dual-write pattern ensures existing analytics and plan logic that reads the `goal` string column continues working.
+
+5. **Elicitation fallback is immediate, not retry-based.** On any error from the `/elicit` endpoint (network, server, timeout), the UI instantly shows legacy goal buttons instead of retrying. This prevents users from being stuck on a broken chat loop during onboarding — the critical path that determines first-session experience.

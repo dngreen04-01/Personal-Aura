@@ -2,7 +2,7 @@
  * blockCRUD.test.js — CRUD on session_blocks and block_entries.
  * Phase 0: raw SQL tests. Phase 1: helper function tests added below.
  */
-const { getDatabase, closeDatabase, createSessionBlock, logBlockEntry, getSessionBlocks, getBlockEntries, createBlocksFromPlan, logStrengthSet, logTimedEffort, logRoundEntry } = require('../../lib/database');
+const { getDatabase, closeDatabase, createSessionBlock, logBlockEntry, getSessionBlocks, getBlockEntries, createBlocksFromPlan, logStrengthSet, logTimedEffort, logRoundEntry, logDistanceEffort, logRestEntry } = require('../../lib/database');
 
 function uid() { return `crud_${Math.random().toString(36).slice(2)}`; }
 
@@ -290,5 +290,69 @@ describe('Timer and round entry logging helpers', () => {
     const entries = await getBlockEntries(blockId);
     const payload = JSON.parse(entries[0].payload_json);
     expect(payload.elapsed_sec).toBe(45);
+  });
+});
+
+// --- Phase 4: Distance and rest entry logging helpers ---
+
+describe('Distance and rest entry logging helpers', () => {
+  afterEach(async () => { await closeDatabase(); });
+
+  it('logDistanceEffort writes a distance_effort entry with distance and elapsed time', async () => {
+    const db = await getDatabase(uid());
+    const sess = await db.runAsync(
+      "INSERT INTO workout_sessions (plan_day, focus) VALUES (?, ?)", [1, 'cardio']
+    );
+    const blockId = await createSessionBlock(sess.lastInsertRowId, 0, 'distance', '1K Run', {
+      target_distance_m: 1000,
+    });
+
+    const entryId = await logDistanceEffort(blockId, 0, 1050, 312, { modality: 'run' });
+    expect(entryId).toBeGreaterThan(0);
+
+    const entries = await getBlockEntries(blockId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].entry_type).toBe('distance_effort');
+    const payload = JSON.parse(entries[0].payload_json);
+    expect(payload.distance_m).toBe(1050);
+    expect(payload.elapsed_sec).toBe(312);
+    expect(payload.modality).toBe('run');
+  });
+
+  it('logDistanceEffort works with null context', async () => {
+    const db = await getDatabase(uid());
+    const sess = await db.runAsync(
+      "INSERT INTO workout_sessions (plan_day, focus) VALUES (?, ?)", [1, 'cardio']
+    );
+    const blockId = await createSessionBlock(sess.lastInsertRowId, 0, 'distance', '5K Row', {
+      target_distance_m: 5000,
+    });
+
+    const entryId = await logDistanceEffort(blockId, 0, 4800, 1200, null);
+    expect(entryId).toBeGreaterThan(0);
+
+    const entries = await getBlockEntries(blockId);
+    const payload = JSON.parse(entries[0].payload_json);
+    expect(payload.distance_m).toBe(4800);
+    expect(payload.elapsed_sec).toBe(1200);
+  });
+
+  it('logRestEntry writes a rest entry with duration', async () => {
+    const db = await getDatabase(uid());
+    const sess = await db.runAsync(
+      "INSERT INTO workout_sessions (plan_day, focus) VALUES (?, ?)", [1, 'mixed']
+    );
+    const blockId = await createSessionBlock(sess.lastInsertRowId, 0, 'rest', 'Recovery', {
+      duration_sec: 120,
+    });
+
+    const entryId = await logRestEntry(blockId, 0, 120);
+    expect(entryId).toBeGreaterThan(0);
+
+    const entries = await getBlockEntries(blockId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].entry_type).toBe('rest');
+    const payload = JSON.parse(entries[0].payload_json);
+    expect(payload.duration_sec).toBe(120);
   });
 });

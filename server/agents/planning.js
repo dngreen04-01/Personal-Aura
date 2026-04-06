@@ -248,6 +248,17 @@ Weight Rules:
 - For bodyweight exercises (push-ups, pull-ups, etc.): use "0kg".
 - Round to nearest 2.5kg for barbell, nearest 2kg for dumbbell, nearest 5kg for cable/machine.
 
+Block type reference (all 9 canonical types):
+- "strength": config: { exercise, target_sets, target_reps }
+- "interval": config: { work_sec, rest_sec, rounds }
+- "amrap": config: { time_cap_sec, movements: [{ name, reps? }] }
+- "emom": config: { minutes, movements: [{ name, reps? }] }
+- "circuit": config: { stations: [{ name, reps?, duration_sec? }], rounds }
+- "timed": config: { duration_sec }
+- "distance": config: { target_distance_m }
+- "cardio": config: { modality, duration_sec?, target_distance_m? }
+- "rest": config: { duration_sec }
+
 You MUST respond with valid JSON matching this exact schema:
 {
   "text": "Brief confirmation message referencing recent training (1-2 sentences)",
@@ -333,13 +344,18 @@ You MUST respond with valid JSON matching this exact schema:
   ]
 }
 
-Block type reference:
-- "strength": weight-based exercise. config requires: exercise (string), target_sets (integer >= 1), target_reps (string or integer).
-- "interval": work/rest cycles. config requires: work_sec (integer > 0), rest_sec (integer >= 0), rounds (integer >= 1).
-- "cardio": cardio modality. config requires: modality (string), and either duration_sec (integer > 0) or target_distance_m (integer > 0).
-- "rest": recovery. config requires: duration_sec (integer > 0).
+Block type reference (all 9 canonical types):
+- "strength": weight-based exercise. config: { exercise (string), target_sets (integer >= 1), target_reps (string or integer) }
+- "interval": work/rest cycles. config: { work_sec (integer > 0), rest_sec (integer >= 0), rounds (integer >= 1) }
+- "amrap": as many rounds as possible. config: { time_cap_sec (integer > 0), movements: [{ name (string), reps (integer, optional) }] }
+- "emom": every minute on the minute. config: { minutes (integer >= 1), movements: [{ name (string), reps (integer, optional) }] }
+- "circuit": station-based circuit. config: { stations: [{ name (string), reps (integer, optional), duration_sec (integer, optional) }], rounds (integer >= 1) }
+- "timed": simple timed hold/effort. config: { duration_sec (integer > 0) }
+- "distance": distance target. config: { target_distance_m (integer > 0) }
+- "cardio": cardio modality. config: { modality (string: run/row/bike/ski/swim), duration_sec (integer > 0, optional), target_distance_m (integer > 0, optional) } — at least one metric required
+- "rest": recovery block. config: { duration_sec (integer > 0) }
 
-For pure strength programs, every exercise becomes a strength block. For mixed programs (HIIT, conditioning), use the appropriate block type.
+For pure strength programs, every exercise becomes a strength block. For mixed programs (HIIT, conditioning, Hyrox, sport-specific), use the appropriate block type.
 The "exercises" array MUST contain one entry per strength block for backward compatibility.`;
 
   const prompt = `User Profile:

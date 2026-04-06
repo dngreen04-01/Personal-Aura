@@ -7,7 +7,7 @@ import { useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
-import { generatePlan } from '../lib/api';
+import { generatePlan, sendElicitationMessage, generateMultiModalityPlan } from '../lib/api';
 import { saveUserProfile, saveWorkoutPlan, saveLocation } from '../lib/database';
 
 const GOALS = [
@@ -57,8 +57,8 @@ export default function OnboardingScreen() {
   const [messages, setMessages] = useState([
     {
       role: 'aura',
-      text: "Welcome! I'm Aura, your new coach. To build your perfect plan, I need to know: what's your primary focus this year?",
-      widgetType: 'goal',
+      text: "Hey! I'm Aura, your new coach. Tell me about your fitness goals — what are you training for?",
+      widgetType: 'elicitation',
     },
   ]);
   const [selectedGoal, setSelectedGoal] = useState(null);
@@ -67,7 +67,14 @@ export default function OnboardingScreen() {
   const [bodyStats, setBodyStats] = useState({ age: '', weight: '', gender: 'Male' });
   const [baselines, setBaselines] = useState({});
   const [schedule, setSchedule] = useState({ daysPerWeek: 4, minutesPerSession: 60 });
-  const [currentStep, setCurrentStep] = useState('goal');
+  const [currentStep, setCurrentStep] = useState('elicitation');
+
+  // Phase 4: conversational elicitation state
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState([]);
+  const [elicitedData, setElicitedData] = useState(null);
+  const [isElicitating, setIsElicitating] = useState(false);
+  const [elicitationFailed, setElicitationFailed] = useState(false);
 
   useEffect(() => {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
@@ -77,6 +84,70 @@ export default function OnboardingScreen() {
     setMessages(prev => [...prev, ...msgs]);
   };
 
+  // Phase 4: send a conversational elicitation message
+  const handleElicitationSend = async () => {
+    const text = chatInput.trim();
+    if (!text || isElicitating) return;
+    setChatInput('');
+
+    addMessages({ role: 'user', text });
+
+    const newHistory = [
+      ...chatHistory,
+      { role: 'user', parts: [{ text }] },
+    ];
+
+    setIsElicitating(true);
+    try {
+      const result = await sendElicitationMessage(text, newHistory);
+
+      const updatedHistory = [
+        ...newHistory,
+        { role: 'model', parts: [{ text: result.text }] },
+      ];
+      setChatHistory(updatedHistory);
+
+      if (result.isComplete && result.extractedData) {
+        setElicitedData(result.extractedData);
+        // Map primary goal to legacy goal string for backward compat
+        const goalMap = { hypertrophy: 'build_muscle', body_composition: 'lose_fat', strength: 'increase_strength' };
+        setSelectedGoal(goalMap[result.extractedData.goals?.primary] || result.extractedData.goals?.primary || 'general_health');
+        addMessages({
+          role: 'aura',
+          text: result.text,
+          widgetType: 'goalConfirmation',
+        });
+      } else {
+        addMessages({
+          role: 'aura',
+          text: result.text,
+          widgetType: 'elicitation',
+        });
+      }
+    } catch (err) {
+      console.error('[Elicitation error]', err);
+      setElicitationFailed(true);
+      setCurrentStep('goal');
+      addMessages({
+        role: 'aura',
+        text: "No worries — let's do this the quick way instead. What's your primary focus?",
+        widgetType: 'goal',
+      });
+    } finally {
+      setIsElicitating(false);
+    }
+  };
+
+  // Phase 4: confirm elicited goals and advance to equipment
+  const handleConfirmGoals = () => {
+    addMessages(
+      { role: 'user', text: 'Looks good!' },
+      { role: 'aura', text: 'Great! What equipment do we have to work with?', widgetType: 'equipment' },
+    );
+    setCurrentStep('equipment');
+  };
+
+  // Legacy fallback: static goal buttons
   const handleGoalSelect = (goal) => {
     setSelectedGoal(goal.id);
     addMessages(
@@ -151,19 +222,45 @@ export default function OnboardingScreen() {
     setCurrentStep('generating');
 
     try {
+      let data;
       const goalLabel = GOALS.find(g => g.id === selectedGoal)?.label || selectedGoal;
-      const data = await generatePlan(goalLabel, selectedEquipment, {
-        age: Number(bodyStats.age),
-        weight: Number(bodyStats.weight),
-        gender: bodyStats.gender,
-        exercises: formattedBaselines,
-      }, schedule);
+
+      if (elicitedData) {
+        // Phase 4: multi-modality plan generation
+        data = await generateMultiModalityPlan({
+          goals: elicitedData.goals,
+          injuries: elicitedData.injuries || [],
+          sport_context: elicitedData.sport_context || null,
+          style_preferences: elicitedData.style_preferences || null,
+          equipment: selectedEquipment,
+          bodyStats: {
+            age: Number(bodyStats.age),
+            weight: Number(bodyStats.weight),
+            gender: bodyStats.gender,
+          },
+          schedule,
+          baselines: { exercises: formattedBaselines },
+        });
+      } else {
+        // Legacy path: strength-only plan
+        data = await generatePlan(goalLabel, selectedEquipment, {
+          age: Number(bodyStats.age),
+          weight: Number(bodyStats.weight),
+          gender: bodyStats.gender,
+          exercises: formattedBaselines,
+        }, schedule);
+      }
 
       await saveUserProfile(goalLabel, selectedEquipment, null, {
         age: Number(bodyStats.age),
         weight: Number(bodyStats.weight),
         gender: bodyStats.gender,
-      }, schedule);
+      }, schedule, {
+        goalsJson: elicitedData?.goals || null,
+        stylePreferencesJson: elicitedData?.style_preferences || null,
+        sportContextJson: elicitedData?.sport_context || null,
+        injuriesJson: elicitedData?.injuries || null,
+      });
       await saveWorkoutPlan(data.plan);
 
       // Create initial default location based on equipment choice
@@ -233,6 +330,8 @@ export default function OnboardingScreen() {
                 baselines={baselines}
                 setBaselines={setBaselines}
                 onFinishAssessment={handleFinishAssessment}
+                onConfirmGoals={handleConfirmGoals}
+                elicitedData={elicitedData}
               />
             ) : (
               <UserMessage text={msg.text} />
@@ -241,9 +340,15 @@ export default function OnboardingScreen() {
         ))}
       </ScrollView>
 
-      {/* Bottom Input (disabled) */}
+      {/* Bottom Input — enabled during elicitation, disabled during structured steps */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.footer}>
+          {isElicitating && (
+            <View style={styles.elicitatingRow}>
+              <ActivityIndicator size="small" color={colors.primary} />
+              <Text style={styles.elicitatingText}>Thinking...</Text>
+            </View>
+          )}
           <View style={styles.inputRow}>
             <TouchableOpacity style={styles.micButton}>
               <MaterialIcons name="mic" size={24} color={colors.bgDark} />
@@ -251,10 +356,19 @@ export default function OnboardingScreen() {
             <View style={styles.inputWrapper}>
               <TextInput
                 style={styles.input}
-                placeholder="Type a message..."
+                placeholder={currentStep === 'elicitation' ? 'Tell Aura about your goals...' : 'Type a message...'}
                 placeholderTextColor={colors.textSecondary}
-                editable={false}
+                editable={currentStep === 'elicitation' && !isElicitating}
+                value={chatInput}
+                onChangeText={setChatInput}
+                onSubmitEditing={handleElicitationSend}
+                returnKeyType="send"
               />
+              {currentStep === 'elicitation' && chatInput.trim().length > 0 && (
+                <TouchableOpacity style={styles.sendButton} onPress={handleElicitationSend} disabled={isElicitating}>
+                  <MaterialIcons name="send" size={20} color={colors.bgDark} />
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
@@ -276,6 +390,7 @@ function AuraMessage({
   bodyStats, setBodyStats, onBodyStatsSubmit,
   schedule, setSchedule, onScheduleSubmit,
   assessmentExercises, baselines, setBaselines, onFinishAssessment,
+  onConfirmGoals, elicitedData,
 }) {
   return (
     <View style={styles.auraRow}>
@@ -287,7 +402,7 @@ function AuraMessage({
           <Text style={styles.auraText}>{text}</Text>
         </View>
 
-        {widgetType === 'goal' && currentStep === 'goal' && (
+        {widgetType === 'goal' && (currentStep === 'goal' || currentStep === 'elicitation') && (
           <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
             {GOALS.map(goal => (
               <TouchableOpacity key={goal.id} style={styles.goalButton} onPress={() => onGoalSelect(goal)}>
@@ -295,6 +410,40 @@ function AuraMessage({
                 <MaterialIcons name={goal.icon} size={20} color={colors.bgDark} />
               </TouchableOpacity>
             ))}
+          </View>
+        )}
+
+        {widgetType === 'goalConfirmation' && currentStep === 'elicitation' && elicitedData && (
+          <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
+            <View style={styles.confirmationCard}>
+              {elicitedData.goals?.primary && (
+                <View style={styles.confirmRow}>
+                  <MaterialIcons name="flag" size={16} color={colors.primary} />
+                  <Text style={styles.confirmLabel}>Goal: <Text style={styles.confirmValue}>{elicitedData.goals.primary.replace(/_/g, ' ')}</Text></Text>
+                </View>
+              )}
+              {elicitedData.goals?.modalities?.length > 0 && (
+                <View style={styles.confirmRow}>
+                  <MaterialIcons name="category" size={16} color={colors.primary} />
+                  <Text style={styles.confirmLabel}>Modalities: <Text style={styles.confirmValue}>{elicitedData.goals.modalities.join(', ')}</Text></Text>
+                </View>
+              )}
+              {elicitedData.sport_context?.sport && (
+                <View style={styles.confirmRow}>
+                  <MaterialIcons name="sports" size={16} color={colors.primary} />
+                  <Text style={styles.confirmLabel}>Sport: <Text style={styles.confirmValue}>{elicitedData.sport_context.sport}</Text></Text>
+                </View>
+              )}
+              {elicitedData.injuries?.length > 0 && (
+                <View style={styles.confirmRow}>
+                  <MaterialIcons name="healing" size={16} color={colors.primaryDim} />
+                  <Text style={styles.confirmLabel}>Injuries: <Text style={styles.confirmValue}>{elicitedData.injuries.map(i => i.area).join(', ')}</Text></Text>
+                </View>
+              )}
+            </View>
+            <TouchableOpacity style={styles.continueButton} onPress={onConfirmGoals}>
+              <Text style={styles.continueButtonText}>Looks good!</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -676,6 +825,26 @@ const styles = StyleSheet.create({
     padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.bgCard, marginTop: spacing.sm,
   },
   loadingText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary },
+
+  // Elicitation UI
+  elicitatingRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    paddingTop: spacing.sm, paddingHorizontal: spacing.xs,
+  },
+  elicitatingText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
+  sendButton: {
+    position: 'absolute', right: 6, top: '50%', transform: [{ translateY: -16 }],
+    width: 32, height: 32, borderRadius: 16, backgroundColor: colors.primary,
+    justifyContent: 'center', alignItems: 'center',
+  },
+  confirmationCard: {
+    backgroundColor: colors.bgCard, borderRadius: radius.lg,
+    padding: spacing.md, gap: spacing.sm,
+    borderWidth: 1, borderColor: 'rgba(212, 255, 0, 0.15)',
+  },
+  confirmRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  confirmLabel: { fontSize: 13, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
+  confirmValue: { fontFamily: 'Inter_600SemiBold', color: colors.textPrimary },
 
   // User messages
   userRow: { flexDirection: 'row', justifyContent: 'flex-end' },

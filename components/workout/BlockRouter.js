@@ -6,6 +6,11 @@
 import IntervalAdapter from './IntervalAdapter';
 import AMRAPAdapter from './AMRAPAdapter';
 import EMOMAdapter from './EMOMAdapter';
+import CircuitAdapter from './CircuitAdapter';
+import TimedAdapter from './TimedAdapter';
+import DistanceAdapter from './DistanceAdapter';
+import CardioAdapter from './CardioAdapter';
+import RestAdapter from './RestAdapter';
 import UnsupportedBlockFallback from './UnsupportedBlockFallback';
 
 export default function BlockRouter({
@@ -40,6 +45,56 @@ export default function BlockRouter({
     case 'emom':
       return (
         <EMOMAdapter
+          blockPosition={blockPosition}
+          blockId={blockId}
+          sessionId={sessionId}
+          config={config}
+          onBlockComplete={onBlockComplete}
+        />
+      );
+    case 'circuit':
+      return (
+        <CircuitAdapter
+          blockPosition={blockPosition}
+          blockId={blockId}
+          sessionId={sessionId}
+          config={config}
+          onBlockComplete={onBlockComplete}
+        />
+      );
+    case 'timed':
+      return (
+        <TimedAdapter
+          blockPosition={blockPosition}
+          blockId={blockId}
+          sessionId={sessionId}
+          config={config}
+          onBlockComplete={onBlockComplete}
+        />
+      );
+    case 'distance':
+      return (
+        <DistanceAdapter
+          blockPosition={blockPosition}
+          blockId={blockId}
+          sessionId={sessionId}
+          config={config}
+          onBlockComplete={onBlockComplete}
+        />
+      );
+    case 'cardio':
+      return (
+        <CardioAdapter
+          blockPosition={blockPosition}
+          blockId={blockId}
+          sessionId={sessionId}
+          config={config}
+          onBlockComplete={onBlockComplete}
+        />
+      );
+    case 'rest':
+      return (
+        <RestAdapter
           blockPosition={blockPosition}
           blockId={blockId}
           sessionId={sessionId}
