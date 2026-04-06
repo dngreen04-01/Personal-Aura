@@ -1,0 +1,80 @@
+{
+  "prompts": [
+    {
+      "id": "strength_upper_push",
+      "prompt": "Give me a 3-block upper-body push strength session",
+      "output": {
+        "blocks": [
+          { "block_type": "strength", "label": "Bench Press", "config": { "exercise": "Barbell Bench Press", "target_sets": 4, "target_reps": "6-8" } },
+          { "block_type": "strength", "label": "Overhead Press", "config": { "exercise": "Overhead Press", "target_sets": 3, "target_reps": "8-10" } },
+          { "block_type": "strength", "label": "Dips", "config": { "exercise": "Dips", "target_sets": 3, "target_reps": "10-12" } }
+        ]
+      }
+    },
+    {
+      "id": "hyrox_station_sim",
+      "prompt": "Hyrox station simulation: run + sled push + wall balls",
+      "output": {
+        "blocks": [
+          { "block_type": "distance", "label": "1km run", "config": { "target_distance_m": 1000 } },
+          { "block_type": "timed", "label": "Sled Push", "config": { "duration_sec": 90 } },
+          { "block_type": "amrap", "label": "Wall Balls", "config": { "time_cap_sec": 180, "movements": [{ "name": "wall ball", "reps": 15 }] } }
+        ]
+      }
+    },
+    {
+      "id": "hiit_intervals",
+      "prompt": "20 minute HIIT intervals 30 on 15 off",
+      "output": {
+        "blocks": [
+          { "block_type": "interval", "label": "30/15 HIIT", "config": { "work_sec": 30, "rest_sec": 15, "rounds": 27 } }
+        ]
+      }
+    },
+    {
+      "id": "emom_conditioning",
+      "prompt": "10-minute EMOM kettlebell swings and burpees",
+      "output": {
+        "blocks": [
+          { "block_type": "emom", "label": "KB/Burpee EMOM", "config": { "minutes": 10, "movements": [{ "name": "kb swing", "reps": 15 }, { "name": "burpee", "reps": 10 }] } }
+        ]
+      }
+    },
+    {
+      "id": "glute_circuit",
+      "prompt": "Glute-focused circuit 3 rounds",
+      "output": {
+        "blocks": [
+          { "block_type": "circuit", "label": "Glute Circuit", "config": { "rounds": 3, "stations": [{ "name": "hip thrust", "reps": 12 }, { "name": "Bulgarian split squat", "reps": 10 }, { "name": "cable kickback", "reps": 15 }] } }
+        ]
+      }
+    },
+    {
+      "id": "cardio_row",
+      "prompt": "15 minute row warmup",
+      "output": {
+        "blocks": [
+          { "block_type": "cardio", "label": "Row Warmup", "config": { "modality": "row", "duration_sec": 900 } }
+        ]
+      }
+    },
+    {
+      "id": "mixed_modality",
+      "prompt": "Full session: warmup run, strength, finisher",
+      "output": {
+        "blocks": [
+          { "block_type": "cardio", "label": "Warmup", "config": { "modality": "run", "duration_sec": 480 } },
+          { "block_type": "strength", "label": "Deadlift", "config": { "exercise": "Deadlift", "target_sets": 5, "target_reps": 5 } },
+          { "block_type": "rest", "label": "Recovery", "config": { "duration_sec": 120 } },
+          { "block_type": "amrap", "label": "Finisher", "config": { "time_cap_sec": 300, "movements": [{ "name": "kb swing", "reps": 20 }, { "name": "box jump", "reps": 10 }] } }
+        ]
+      }
+    }
+  ],
+  "malformedOutputs": [
+    { "id": "missing_exercise", "output": { "blocks": [{ "block_type": "strength", "config": { "target_sets": 3 } }] } },
+    { "id": "bad_block_type", "output": { "blocks": [{ "block_type": "yoga", "config": {} }] } },
+    { "id": "negative_time", "output": { "blocks": [{ "block_type": "timed", "config": { "duration_sec": -10 } }] } },
+    { "id": "cardio_no_modality", "output": { "blocks": [{ "block_type": "cardio", "config": { "duration_sec": 300 } }] } }
+  ]
+}

@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView, AppState,
+  View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
   Image, Share,
 } from 'react-native';
@@ -10,16 +10,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Slider from '@react-native-community/slider';
 import * as Haptics from 'expo-haptics';
 import { colors, spacing, radius } from '../lib/theme';
-import { startSession, endSession, logSet as dbLogSet, getSessionStats, getExerciseProgressionData, getExerciseMaxWeight, getWorkoutStreak, getCompletedSessionCount, getUserProfile, getExerciseUnitPreference, setExerciseUnitPreference, getCachedExercisesByNames, saveRestTimer, clearRestTimer, getActiveRestTimer, getTrainingContext, saveSessionState, getSessionState } from '../lib/database';
+import { endSession, getSessionStats, logStrengthSet, getTrainingContext, setExerciseUnitPreference } from '../lib/database';
 import { sendAgentMessage, generateExerciseImage, generateWorkoutCard } from '../lib/api';
 import ExerciseDetail from '../components/ExerciseDetail';
-import BeginSetModal from '../components/BeginSetModal';
+import TransitionModal from '../components/workout/TransitionModal';
 import ExerciseHub from '../components/ExerciseHub';
 import { buildUserContext } from '../lib/contextBuilder';
-import { convertWeight, formatWeight, formatWeightBadge, getIncrements, getDefaultIncrement, snapToIncrement, detectEquipmentType } from '../lib/weightUtils';
+import { convertWeight, formatWeight, getIncrements, getDefaultIncrement, snapToIncrement } from '../lib/weightUtils';
 import { evaluateSet, checkMilestone } from '../lib/motivation';
-
-import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAlarm, cancelAll, notifee, EventType, ACTION_BEGIN_SET, ACTION_EXTEND_15S } from '../lib/notifications';
+import useRestTimer from '../hooks/useRestTimer';
+import useExerciseState from '../hooks/useExerciseState';
+import useWorkoutSession from '../hooks/useWorkoutSession';
 
 export default function WorkoutScreen() {
   const router = useRouter();
@@ -29,322 +30,99 @@ export default function WorkoutScreen() {
   try { day = dayJson ? JSON.parse(dayJson) : null; } catch (_) {}
   try { location = locationJson ? JSON.parse(locationJson) : null; } catch (_) {}
 
-  const [sessionId, setSessionId] = useState(null);
-  const [currentExIdx, setCurrentExIdx] = useState(parseInt(startIdx) || 0);
-  const [currentSet, setCurrentSet] = useState(1);
-  const [isResting, setIsResting] = useState(false);
-  const [restRemaining, setRestRemaining] = useState(0);
-  const restEndTimeRef = useRef(null);
-  const pendingAdvanceRef = useRef(null);
-  const [rpe, setRpe] = useState(null);
-  const [weightBadge, setWeightBadge] = useState(null);
-
   const exercises = day?.exercises || [];
+  const inputRef = useRef(null);
+
+  // --- Session lifecycle hook ---
+  const session = useWorkoutSession({ day, location, startIdx, resumeSessionId, exercises });
+  const {
+    sessionId, userProfile, blockMap,
+    currentExIdx, setCurrentExIdx,
+    currentSet, setCurrentSet,
+    completedExercises, setCompletedExercises,
+    exerciseSets, setExerciseSets,
+  } = session;
+
   const currentExercise = exercises[currentExIdx];
   const totalSets = parseInt(currentExercise?.sets) || 4;
   const targetReps = parseInt(currentExercise?.reps) || 8;
   const targetWeight = parseFloat(currentExercise?.targetWeight) || 0;
   const restDuration = parseInt(currentExercise?.restSeconds) || 90;
 
-  const [weight, setWeight] = useState(targetWeight);
-  const [lastLoggedWeight, setLastLoggedWeight] = useState(null);
-  const [reps, setReps] = useState(targetReps);
-  const [pushSuggestion, setPushSuggestion] = useState(null);
+  // --- Exercise state hook ---
+  const exState = useExerciseState({ exercises, currentExIdx, userProfile });
+  const {
+    weight, setWeight,
+    lastLoggedWeight, setLastLoggedWeight,
+    reps, setReps,
+    rpe, setRpe,
+    weightUnit, setWeightUnit,
+    weightBadge,
+    isEstimatedWeight, setIsEstimatedWeight,
+    pushSuggestion, setPushSuggestion,
+    exerciseMaxWeight, streakData, completedSessions,
+    weightIncrement, setWeightIncrement,
+    libraryExercise,
+    exerciseImage, setExerciseImage,
+    isEditingWeight, setIsEditingWeight,
+    weightInputText, setWeightInputText,
+  } = exState;
+
+  // --- Rest timer hook ---
+  const timer = useRestTimer({
+    sessionId,
+    currentExercise,
+    currentSet,
+    totalSets,
+    currentExIdx,
+    totalExercises: exercises.length,
+    restDuration,
+    day,
+    completedExercises,
+    exerciseSets,
+  });
+  const {
+    isResting, restRemaining, alarmFired,
+    startRest, handleBeginSet, handleExtendRest, handleSkipRest,
+    recoverTimer, pendingAdvanceRef,
+  } = timer;
+
+  // --- Local UI state ---
   const [inputText, setInputText] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [aiResponse, setAiResponse] = useState(null);
-  const [userProfile, setUserProfile] = useState(null);
-  const [weightUnit, setWeightUnit] = useState('kg');
-  const [isEditingWeight, setIsEditingWeight] = useState(false);
-  const [weightInputText, setWeightInputText] = useState('');
-  const [weightIncrement, setWeightIncrement] = useState(2.5);
   const [showComplete, setShowComplete] = useState(false);
   const [completeStats, setCompleteStats] = useState(null);
   const [completeMessage, setCompleteMessage] = useState(null);
   const [celebration, setCelebration] = useState(null);
-  const [exerciseMaxWeight, setExerciseMaxWeight] = useState(null);
-  const [streakData, setStreakData] = useState(null);
-  const [completedSessions, setCompletedSessions] = useState(null);
-  const [exerciseImage, setExerciseImage] = useState(null);
   const [isImageLoading, setIsImageLoading] = useState(false);
   const [shareImage, setShareImage] = useState(null);
   const [isShareLoading, setIsShareLoading] = useState(false);
-  const [libraryExercise, setLibraryExercise] = useState(null);
   const [showExerciseDetail, setShowExerciseDetail] = useState(false);
-  const [isEstimatedWeight, setIsEstimatedWeight] = useState(false);
-  const [alarmFired, setAlarmFired] = useState(false);
   const [showExerciseHub, setShowExerciseHub] = useState(false);
-  const [completedExercises, setCompletedExercises] = useState(new Set());
-  const [exerciseSets, setExerciseSets] = useState({});
-  const restIdRef = useRef(null);
-  const alarmSoundCapRef = useRef(null);
-  const inputRef = useRef(null);
-  const weightInputRef = useRef(null);
 
-  // Reset weight/reps/rpe when exercise changes, apply progressive overload
-  useEffect(() => {
-    if (currentExercise) {
-      const planWeightKg = parseFloat(currentExercise.targetWeight) || 0;
-      setReps(parseInt(currentExercise.reps) || 8);
-      setRpe(null);
-      setWeightBadge(null);
-      setPushSuggestion(null);
-      setLastLoggedWeight(null);
-      setIsEditingWeight(false);
-      setExerciseImage(null);
-      setLibraryExercise(null);
-      setIsEstimatedWeight(false);
+  // Recover timer on mount (called from session init via useEffect in useWorkoutSession)
+  // We trigger it once session is ready
+  useState(() => { recoverTimer(); });
 
-      // Look up exercise in local library cache
-      getCachedExercisesByNames([currentExercise.name])
-        .then(results => { if (results.length > 0) setLibraryExercise(results[0]); })
-        .catch(() => {});
-
-      (async () => {
-        try {
-          // Load per-exercise unit preference
-          const unit = await getExerciseUnitPreference(currentExercise.name);
-          setWeightUnit(unit);
-          setWeightIncrement(getDefaultIncrement(unit, currentExercise.name));
-
-          // Load milestone data for motivation engine
-          const [maxW, streak, sessions] = await Promise.all([
-            getExerciseMaxWeight(currentExercise.name),
-            getWorkoutStreak(),
-            getCompletedSessionCount(),
-          ]);
-          setExerciseMaxWeight(maxW);
-          setStreakData(streak);
-          setCompletedSessions(sessions);
-
-          const progression = await getExerciseProgressionData(currentExercise.name, 4, unit);
-          // Plan target is always in kg — convert to display unit
-          const planWeightDisplay = unit === 'lbs' ? Math.round(planWeightKg * 2.20462) : planWeightKg;
-
-          if (progression.suggestedWeight && progression.suggestedWeight !== planWeightDisplay) {
-            setWeight(progression.suggestedWeight);
-            const diff = progression.suggestedWeight - planWeightDisplay;
-            if (diff > 0) {
-              setWeightBadge(formatWeightBadge(diff, unit));
-            } else if (planWeightDisplay > 0) {
-              setWeightBadge(`${Math.round(((progression.suggestedWeight / planWeightDisplay) - 1) * 100)}%`);
-            }
-            if (progression.pushReason && progression.suggestedWeight > planWeightDisplay) {
-              setPushSuggestion(progression.pushReason);
-            }
-          } else {
-            setWeight(planWeightDisplay);
-            const isFirstTime = progression.weights.length === 0 && planWeightDisplay > 0;
-            const isMarkedEstimated = currentExercise.isEstimated === true;
-            setIsEstimatedWeight(isFirstTime || isMarkedEstimated);
-          }
-        } catch {
-          const planWeightDisplay = weightUnit === 'lbs' ? Math.round(planWeightKg * 2.20462) : planWeightKg;
-          setWeight(planWeightDisplay);
-        }
-      })();
-    }
-  }, [currentExIdx]);
-
-  // Start session and check for timer recovery
-  useEffect(() => {
-    const init = async () => {
-      if (resumeSessionId) {
-        const id = parseInt(resumeSessionId);
-        setSessionId(id);
-        try {
-          const state = await getSessionState(id);
-          if (state?.position_json) {
-            const pos = JSON.parse(state.position_json);
-            if (pos.currentExIdx != null) setCurrentExIdx(pos.currentExIdx);
-            if (pos.currentSet != null) setCurrentSet(pos.currentSet);
-            if (pos.completedExercises) setCompletedExercises(new Set(pos.completedExercises));
-            if (pos.exerciseSets) setExerciseSets(pos.exerciseSets);
-          }
-        } catch {}
-      } else if (day) {
-        const id = await startSession(day.day, day.focus, location?.id || null, { exercisesJson: JSON.stringify(day) });
-        setSessionId(id);
-      }
-      try {
-        const profile = await getUserProfile();
-        setUserProfile(profile);
-      } catch {}
-
-      // Check for active rest timer (app-kill recovery)
-      try {
-        const saved = await getActiveRestTimer();
-        if (saved) {
-          const remaining = Math.max(0, Math.ceil((saved.rest_end_time - Date.now()) / 1000));
-          restIdRef.current = saved.rest_id;
-          if (remaining > 0) {
-            // Timer still running — resume countdown
-            restEndTimeRef.current = saved.rest_end_time;
-            setIsResting(true);
-            setRestRemaining(remaining);
-            showTimerNotification(saved.exercise_name || 'Rest', remaining, saved.rest_id);
-            scheduleAlarmNotification(remaining, saved.rest_id);
-          } else {
-            // Timer expired while app was killed — show Begin Set modal
-            setAlarmFired(true);
-            fireAlarmNow(saved.rest_id);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            alarmSoundCapRef.current = setTimeout(() => stopAlarm(), 300000);
-          }
-        }
-      } catch {}
-    };
-    init();
-    return () => {
-      // Cleanup alarm sound cap on unmount
-      if (alarmSoundCapRef.current) clearTimeout(alarmSoundCapRef.current);
-      cancelAll();
-    };
-  }, []);
-
-  // Persist session state on changes (debounced)
-  useEffect(() => {
-    if (!sessionId || !day) return;
-    const timeout = setTimeout(() => {
-      saveSessionState(sessionId, day, {
-        currentExIdx,
-        currentSet,
-        completedExercises: Array.from(completedExercises),
-        exerciseSets,
-      }).catch(() => {});
-    }, 500);
-    return () => clearTimeout(timeout);
-  }, [sessionId, currentExIdx, currentSet, completedExercises, exerciseSets]);
-
-  // Rest complete: show Begin Set modal instead of auto-advancing
-  const completeRest = useCallback(() => {
-    setIsResting(false);
-    setRestRemaining(0);
-    restEndTimeRef.current = null;
-    setAlarmFired(true);
-    fireAlarmNow(restIdRef.current);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    // 5-minute alarm sound cap (foreground safety net)
-    alarmSoundCapRef.current = setTimeout(() => stopAlarm(), 300000);
-    // Timer completed — clear persistence (Begin Set handles the advance)
-    clearRestTimer().catch(() => {});
-    // pendingAdvanceRef is preserved — consumed when user taps Begin Set
-  }, []);
-
-  // User taps "Begin Set" on the modal
-  const handleBeginSet = useCallback(() => {
-    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
-    stopAlarm();
-    cancelAll();
-    clearRestTimer().catch(() => {});
-    setAlarmFired(false);
-    const advance = pendingAdvanceRef.current;
-    pendingAdvanceRef.current = null;
-    if (advance) advance();
-  }, []);
-
-  // User taps "+15 seconds" on the modal
-  const handleExtendRest = useCallback(() => {
-    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
-    stopAlarm();
-    cancelAll();
-    setAlarmFired(false);
-    restEndTimeRef.current = Date.now() + 15000;
-    setIsResting(true);
-    setRestRemaining(15);
-    showTimerNotification(currentExercise?.name || 'Rest', 15, restIdRef.current);
-    scheduleAlarmNotification(15, restIdRef.current);
-    // Update persisted timer with extended time
-    saveRestTimer(restEndTimeRef.current, sessionId, currentExercise?.name || '', currentSet, totalSets, currentExIdx, exercises.length, restIdRef.current).catch(() => {});
-  }, [currentExercise, sessionId, currentSet, totalSets, currentExIdx, exercises.length]);
-
-  // Rest timer - uses end timestamp so it survives backgrounding
-  useEffect(() => {
-    if (!isResting || !restEndTimeRef.current) return;
-    const interval = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
-      if (remaining <= 0) {
-        completeRest();
-      } else {
-        setRestRemaining(remaining);
-      }
-    }, 250);
-    return () => clearInterval(interval);
-  }, [isResting, completeRest]);
-
-  // Recalculate rest timer when app returns to foreground
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'background' || nextState === 'inactive') {
-        if (sessionId && day) {
-          saveSessionState(sessionId, day, {
-            currentExIdx,
-            currentSet,
-            completedExercises: Array.from(completedExercises),
-            exerciseSets,
-          }).catch(() => {});
-        }
-      }
-      if (nextState === 'active') {
-        // If alarm already fired, ensure modal is visible and dismiss notification
-        if (alarmFired) {
-          cancelAll();
-          return;
-        }
-        if (restEndTimeRef.current) {
-          const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
-          if (remaining <= 0) {
-            completeRest();
-          } else {
-            setRestRemaining(remaining);
-            setIsResting(true);
-          }
-        }
-      }
-    });
-    return () => sub.remove();
-  }, [completeRest, alarmFired, sessionId, day, currentExIdx, currentSet, completedExercises, exerciseSets]);
-
-  // Handle Notifee notification action button taps (foreground)
-  useEffect(() => {
-    const unsub = notifee.onForegroundEvent(({ type, detail }) => {
-      if (type !== EventType.ACTION_PRESS && type !== EventType.PRESS) return;
-      const actionId = detail?.pressAction?.id;
-      const notifRestId = detail?.notification?.data?.restId;
-      // Guard against stale notification taps from a previous rest
-      if (notifRestId && restIdRef.current && String(notifRestId) !== String(restIdRef.current)) return;
-
-      if (actionId === ACTION_BEGIN_SET || (type === EventType.PRESS && alarmFired)) {
-        handleBeginSet();
-      } else if (actionId === ACTION_EXTEND_15S) {
-        handleExtendRest();
-      }
-    });
-    return unsub;
-  }, [handleBeginSet, handleExtendRest, alarmFired]);
-
+  // --- Derived ---
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Calculate total sets completed using actual logged sets
   const totalLoggedSets = Object.values(exerciseSets).reduce((sum, n) => sum + n, 0);
   const grandTotalSets = exercises.reduce((sum, e) => sum + (parseInt(e.sets) || 3), 0);
   const progressPercent = grandTotalSets > 0 ? Math.round((totalLoggedSets / grandTotalSets) * 100) : 0;
 
+  // --- Handlers ---
+
   const handleShowMe = async () => {
-    if (exerciseImage) {
-      setExerciseImage(null);
-      return;
-    }
+    if (exerciseImage) { setExerciseImage(null); return; }
     setIsImageLoading(true);
     try {
-      const result = await generateExerciseImage(
-        currentExercise.name,
-        userProfile?.equipment || null,
-      );
+      const result = await generateExerciseImage(currentExercise.name, userProfile?.equipment || null);
       setExerciseImage(result);
     } catch (err) {
       console.error('Image generation failed:', err.message);
@@ -376,7 +154,6 @@ export default function WorkoutScreen() {
     try {
       let trainingCtx = null;
       try { trainingCtx = await getTrainingContext(7); } catch {}
-
       const userContext = buildUserContext({
         profile: userProfile,
         exercise: {
@@ -401,9 +178,12 @@ export default function WorkoutScreen() {
   };
 
   const handleDone = async () => {
-    // Log to DB
+    // Dual-write: legacy workout_sets + block_entries
     if (sessionId && currentExercise) {
-      await dbLogSet(sessionId, currentExercise.name, currentSet, weight, weightUnit, reps, rpe, restDuration);
+      await logStrengthSet(
+        sessionId, blockMap[currentExercise.name] || null,
+        currentExercise.name, currentSet, weight, weightUnit, reps, rpe, restDuration
+      );
     }
     setLastLoggedWeight(weight);
 
@@ -415,7 +195,7 @@ export default function WorkoutScreen() {
       setCompletedExercises(prev => new Set(prev).add(currentExIdx));
     }
 
-    // Motivation Engine: evaluate set and provide structured coaching feedback
+    // Motivation Engine
     if (rpe !== null) {
       const evaluation = evaluateSet({
         rpe,
@@ -425,7 +205,6 @@ export default function WorkoutScreen() {
         exerciseName: currentExercise.name,
       });
 
-      // Check for milestones
       const milestone = checkMilestone({
         currentWeight: weight,
         exerciseMaxWeight,
@@ -433,17 +212,14 @@ export default function WorkoutScreen() {
         completedSessions,
       });
 
-      // Show coaching message
       setAiResponse({ text: evaluation.messageHint });
 
-      // Show celebration banner on milestone
       if (milestone) {
         setCelebration(milestone);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         setTimeout(() => setCelebration(null), 3000);
       }
 
-      // Auto-bump weight for next set if push tone with weight adjustment
       if (evaluation.tone === 'push' && evaluation.weightAdjustment && currentSet < totalSets) {
         const adjKg = evaluation.weightAdjustment.value;
         const increment = weightUnit === 'lbs' ? Math.round(adjKg * 2.20462) : adjKg;
@@ -453,31 +229,19 @@ export default function WorkoutScreen() {
 
     if (isEstimatedWeight) setIsEstimatedWeight(false);
 
-    // Start rest with absolute end timestamp
-    restIdRef.current = Date.now();
-    restEndTimeRef.current = restIdRef.current + restDuration * 1000;
-    setIsResting(true);
-    setRestRemaining(restDuration);
-    showTimerNotification(currentExercise.name, restDuration, restIdRef.current);
-    scheduleAlarmNotification(restDuration, restIdRef.current);
-    // Persist for app-kill recovery
-    saveRestTimer(restEndTimeRef.current, sessionId, currentExercise.name, currentSet, totalSets, currentExIdx, exercises.length, restIdRef.current).catch(() => {});
-
-    // Queue what happens after rest completes
+    // Determine what happens after rest
+    let afterRestCallback = null;
     if (currentSet >= totalSets) {
       if (currentExIdx < exercises.length - 1) {
-        // Show Exercise Hub instead of auto-advancing
-        pendingAdvanceRef.current = () => {
-          setShowExerciseHub(true);
-        };
+        afterRestCallback = () => setShowExerciseHub(true);
       } else {
         const sid = sessionId;
-        pendingAdvanceRef.current = async () => {
+        afterRestCallback = async () => {
           if (sid) await endSession(sid);
           const stats = sid ? await getSessionStats(sid) : null;
           setCompleteStats(stats);
           setShowComplete(true);
-          // Fire off agent celebration message in background (fallback to coach)
+
           const completeCtx = buildUserContext({
             profile: userProfile,
             completion: stats,
@@ -491,33 +255,24 @@ export default function WorkoutScreen() {
       }
     } else {
       setCurrentSet(prev => prev + 1);
-      pendingAdvanceRef.current = null;
     }
+
+    startRest(currentExercise.name, restDuration, afterRestCallback);
   };
 
-  const handleSkipRest = () => {
-    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
-    restEndTimeRef.current = null;
-    cancelAll();
-    clearRestTimer().catch(() => {});
-    setAlarmFired(false);
-    const advance = pendingAdvanceRef.current;
-    pendingAdvanceRef.current = null;
-    setIsResting(false);
-    setRestRemaining(0);
-    if (advance) {
-      advance();
-    } else if (currentSet > totalSets && currentExIdx < exercises.length - 1) {
+  const handleSkipRestWithFallback = () => {
+    handleSkipRest();
+    // If skip during exercise transition, show hub
+    if (currentSet > totalSets && currentExIdx < exercises.length - 1) {
       setShowExerciseHub(true);
     }
   };
 
-  // Find the next incomplete exercise (suggested next)
+  // Find the next incomplete exercise
   const suggestedNextIdx = (() => {
     for (let i = 0; i < exercises.length; i++) {
       if (!completedExercises.has(i) && !(exerciseSets[i] > 0)) return i;
     }
-    // All started — find first not fully completed
     for (let i = 0; i < exercises.length; i++) {
       if (!completedExercises.has(i)) return i;
     }
@@ -531,9 +286,6 @@ export default function WorkoutScreen() {
   };
 
   const handleClose = async () => {
-    if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
-    cancelAll();
-    clearRestTimer().catch(() => {});
     if (sessionId && !showComplete) await endSession(sessionId);
     router.back();
   };
@@ -545,6 +297,13 @@ export default function WorkoutScreen() {
       </SafeAreaView>
     );
   }
+
+  // Determine TransitionModal variant
+  const transitionVariant = (() => {
+    if (currentSet >= totalSets && currentExIdx >= exercises.length - 1) return 'workout_complete';
+    if (currentSet >= totalSets) return 'exercise_complete';
+    return 'begin_set';
+  })();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -624,12 +383,8 @@ export default function WorkoutScreen() {
               }}
               activeOpacity={0.7}
             >
-              {isDone && (
-                <MaterialIcons name="check-circle" size={14} color={colors.primary} />
-              )}
-              {isPartial && (
-                <MaterialIcons name="radio-button-checked" size={14} color="rgb(251,191,36)" />
-              )}
+              {isDone && <MaterialIcons name="check-circle" size={14} color={colors.primary} />}
+              {isPartial && <MaterialIcons name="radio-button-checked" size={14} color="rgb(251,191,36)" />}
               <Text
                 style={[
                   styles.exercisePillText,
@@ -649,11 +404,10 @@ export default function WorkoutScreen() {
       {/* Main Content */}
       <ScrollView style={styles.mainScroll} contentContainerStyle={styles.mainContent}>
         {isResting ? (
-          /* Rest Timer */
           <View style={styles.restContainer}>
             <Text style={styles.restLabel}>REST</Text>
             <Text style={styles.restTimer}>{formatTime(restRemaining)}</Text>
-            <TouchableOpacity style={styles.skipRestButton} onPress={handleSkipRest}>
+            <TouchableOpacity style={styles.skipRestButton} onPress={handleSkipRestWithFallback}>
               <Text style={styles.skipRestText}>SKIP REST</Text>
             </TouchableOpacity>
           </View>
@@ -715,11 +469,7 @@ export default function WorkoutScreen() {
             {exerciseImage && (
               <View style={styles.exerciseImageContainer}>
                 {exerciseImage.image && (
-                  <Image
-                    source={{ uri: exerciseImage.image }}
-                    style={styles.exerciseImage}
-                    resizeMode="contain"
-                  />
+                  <Image source={{ uri: exerciseImage.image }} style={styles.exerciseImage} resizeMode="contain" />
                 )}
                 {exerciseImage.caption ? (
                   <Text style={styles.exerciseImageCaption}>{exerciseImage.caption}</Text>
@@ -740,16 +490,12 @@ export default function WorkoutScreen() {
                   )}
                 </View>
                 <View style={styles.adjusterControls}>
-                  <TouchableOpacity
-                    style={styles.adjusterButton}
-                    onPress={() => setWeight(w => Math.max(0, w - weightIncrement))}
-                  >
+                  <TouchableOpacity style={styles.adjusterButton} onPress={() => setWeight(w => Math.max(0, w - weightIncrement))}>
                     <MaterialIcons name="remove" size={22} color={colors.primary} />
                   </TouchableOpacity>
                   <View style={styles.adjusterValueContainer}>
                     {isEditingWeight ? (
                       <TextInput
-                        ref={weightInputRef}
                         style={styles.adjusterValueInput}
                         value={weightInputText}
                         onChangeText={setWeightInputText}
@@ -758,26 +504,17 @@ export default function WorkoutScreen() {
                         selectTextOnFocus
                         onSubmitEditing={() => {
                           const parsed = parseFloat(weightInputText);
-                          if (!isNaN(parsed) && parsed >= 0) {
-                            setWeight(snapToIncrement(parsed, weightUnit, currentExercise.name));
-                          }
+                          if (!isNaN(parsed) && parsed >= 0) setWeight(snapToIncrement(parsed, weightUnit, currentExercise.name));
                           setIsEditingWeight(false);
                         }}
                         onBlur={() => {
                           const parsed = parseFloat(weightInputText);
-                          if (!isNaN(parsed) && parsed >= 0) {
-                            setWeight(snapToIncrement(parsed, weightUnit, currentExercise.name));
-                          }
+                          if (!isNaN(parsed) && parsed >= 0) setWeight(snapToIncrement(parsed, weightUnit, currentExercise.name));
                           setIsEditingWeight(false);
                         }}
                       />
                     ) : (
-                      <TouchableOpacity
-                        onPress={() => {
-                          setWeightInputText(formatWeight(weight, weightUnit));
-                          setIsEditingWeight(true);
-                        }}
-                      >
+                      <TouchableOpacity onPress={() => { setWeightInputText(formatWeight(weight, weightUnit)); setIsEditingWeight(true); }}>
                         <Text style={styles.adjusterValue} numberOfLines={1}>{formatWeight(weight, weightUnit)}</Text>
                       </TouchableOpacity>
                     )}
@@ -795,21 +532,16 @@ export default function WorkoutScreen() {
                       >
                         <Text style={styles.unitToggleText}>{weightUnit.toUpperCase()}</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => {
-                          const increments = getIncrements(weightUnit);
-                          const idx = increments.indexOf(weightIncrement);
-                          setWeightIncrement(increments[(idx + 1) % increments.length]);
-                        }}
-                      >
+                      <TouchableOpacity onPress={() => {
+                        const increments = getIncrements(weightUnit);
+                        const idx = increments.indexOf(weightIncrement);
+                        setWeightIncrement(increments[(idx + 1) % increments.length]);
+                      }}>
                         <Text style={styles.incrementLabel}>±{weightIncrement}</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
-                  <TouchableOpacity
-                    style={styles.adjusterButton}
-                    onPress={() => setWeight(w => w + weightIncrement)}
-                  >
+                  <TouchableOpacity style={styles.adjusterButton} onPress={() => setWeight(w => w + weightIncrement)}>
                     <MaterialIcons name="add" size={22} color={colors.primary} />
                   </TouchableOpacity>
                 </View>
@@ -821,17 +553,11 @@ export default function WorkoutScreen() {
               <View style={styles.adjusterRow}>
                 <Text style={styles.adjusterLabel}>Reps</Text>
                 <View style={styles.adjusterControls}>
-                  <TouchableOpacity
-                    style={styles.adjusterButton}
-                    onPress={() => setReps(r => Math.max(1, r - 1))}
-                  >
+                  <TouchableOpacity style={styles.adjusterButton} onPress={() => setReps(r => Math.max(1, r - 1))}>
                     <MaterialIcons name="remove" size={22} color={colors.primary} />
                   </TouchableOpacity>
                   <Text style={styles.adjusterValue}>{reps}</Text>
-                  <TouchableOpacity
-                    style={styles.adjusterButton}
-                    onPress={() => setReps(r => r + 1)}
-                  >
+                  <TouchableOpacity style={styles.adjusterButton} onPress={() => setReps(r => r + 1)}>
                     <MaterialIcons name="add" size={22} color={colors.primary} />
                   </TouchableOpacity>
                 </View>
@@ -851,12 +577,8 @@ export default function WorkoutScreen() {
       </ScrollView>
 
       {/* Bottom Voice Bar */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
         <View style={styles.voiceBar}>
-          {/* Coach Response */}
           {(aiResponse || isAiLoading) && (
             <View style={styles.aiResponseContainer}>
               <View style={styles.aiResponseHeader}>
@@ -876,7 +598,6 @@ export default function WorkoutScreen() {
             </View>
           )}
 
-          {/* Always-Visible Chat Input */}
           <View style={styles.voiceBarInner}>
             <TextInput
               ref={inputRef}
@@ -899,17 +620,12 @@ export default function WorkoutScreen() {
               {isAiLoading ? (
                 <ActivityIndicator size="small" color={colors.bgDark} />
               ) : (
-                <MaterialIcons
-                  name="send"
-                  size={18}
-                  color={inputText.trim() ? colors.bgDark : 'rgba(212,255,0,0.3)'}
-                />
+                <MaterialIcons name="send" size={18} color={inputText.trim() ? colors.bgDark : 'rgba(212,255,0,0.3)'} />
               )}
             </TouchableOpacity>
           </View>
         </View>
       </KeyboardAvoidingView>
-
 
       {/* Workout Complete Overlay */}
       <Modal visible={showComplete} animationType="fade" transparent>
@@ -958,14 +674,9 @@ export default function WorkoutScreen() {
               )}
             </View>
 
-            {/* Share Workout Card */}
             {shareImage?.image ? (
               <View style={styles.shareImageContainer}>
-                <Image
-                  source={{ uri: shareImage.image }}
-                  style={styles.shareImage}
-                  resizeMode="contain"
-                />
+                <Image source={{ uri: shareImage.image }} style={styles.shareImage} resizeMode="contain" />
                 <TouchableOpacity
                   style={styles.shareActionButton}
                   onPress={() => Share.share({ message: shareImage.caption || 'Crushed my workout with Aura!' })}
@@ -976,12 +687,7 @@ export default function WorkoutScreen() {
                 </TouchableOpacity>
               </View>
             ) : (
-              <TouchableOpacity
-                style={styles.shareButton}
-                onPress={handleShareWorkout}
-                disabled={isShareLoading}
-                activeOpacity={0.7}
-              >
+              <TouchableOpacity style={styles.shareButton} onPress={handleShareWorkout} disabled={isShareLoading} activeOpacity={0.7}>
                 {isShareLoading ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
@@ -1017,16 +723,15 @@ export default function WorkoutScreen() {
         onSelectExercise={handleExerciseHubSelect}
       />
 
-      {/* Begin Set Modal (alarm dismiss) */}
-      <BeginSetModal
+      {/* Begin Set / Exercise Complete / Workout Complete Modal */}
+      <TransitionModal
         visible={alarmFired}
-        exerciseName={currentExercise?.name || ''}
-        setNumber={currentSet}
-        totalSets={totalSets}
-        isLastSet={currentSet >= totalSets && currentExIdx >= exercises.length - 1}
-        isExerciseTransition={currentSet >= totalSets && currentExIdx < exercises.length - 1}
-        onBeginSet={handleBeginSet}
-        onExtend={handleExtendRest}
+        variant={transitionVariant}
+        title={currentExercise?.name || ''}
+        subtitle={`SET ${currentSet} OF ${totalSets}`}
+        onPrimaryAction={handleBeginSet}
+        secondaryLabel="+15 SECONDS"
+        onSecondaryAction={handleExtendRest}
       />
     </SafeAreaView>
   );
@@ -1055,11 +760,7 @@ function RpeSelector({ rpe, setRpe }) {
       <View style={styles.rpeHeader}>
         <View>
           <Text style={styles.rpeTitle}>HOW HARD WAS THAT? (RPE)</Text>
-          <TouchableOpacity
-            style={styles.rpeHelpButton}
-            onPress={() => setShowTooltip(!showTooltip)}
-            activeOpacity={0.7}
-          >
+          <TouchableOpacity style={styles.rpeHelpButton} onPress={() => setShowTooltip(!showTooltip)} activeOpacity={0.7}>
             <MaterialIcons name="help-outline" size={12} color="rgba(212,255,0,0.4)" />
             <Text style={styles.rpeHelpText}>What is this?</Text>
           </TouchableOpacity>
@@ -1149,18 +850,10 @@ const styles = StyleSheet.create({
     borderRadius: radius.full, backgroundColor: 'rgba(212,255,0,0.06)',
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.08)',
   },
-  exercisePillActive: {
-    backgroundColor: colors.primary, borderColor: colors.primary,
-  },
-  exercisePillDone: {
-    backgroundColor: 'rgba(212,255,0,0.1)', borderColor: 'rgba(212,255,0,0.2)',
-  },
-  exercisePillPartial: {
-    backgroundColor: 'rgba(251,191,36,0.08)', borderColor: 'rgba(251,191,36,0.25)',
-  },
-  exercisePillText: {
-    fontSize: 12, fontFamily: 'Inter_500Medium', color: colors.textMuted, maxWidth: 120,
-  },
+  exercisePillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  exercisePillDone: { backgroundColor: 'rgba(212,255,0,0.1)', borderColor: 'rgba(212,255,0,0.2)' },
+  exercisePillPartial: { backgroundColor: 'rgba(251,191,36,0.08)', borderColor: 'rgba(251,191,36,0.25)' },
+  exercisePillText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: colors.textMuted, maxWidth: 120 },
   exercisePillTextActive: { color: colors.bgDark, fontFamily: 'Inter_700Bold' },
   exercisePillTextDone: { color: colors.primary },
   exercisePillTextPartial: { color: 'rgb(251,191,36)' },
@@ -1211,9 +904,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.25)',
   },
   unitToggleText: { fontSize: 12, fontFamily: 'Inter_700Bold', color: colors.primary },
-  unitIncrementRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2,
-  },
+  unitIncrementRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 },
   incrementLabel: { fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary },
   divider: { height: 1, backgroundColor: 'rgba(212,255,0,0.1)' },
 
@@ -1248,46 +939,30 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md, paddingRight: 6, paddingVertical: 6,
     borderWidth: 1.5, borderColor: 'rgba(212,255,0,0.25)',
   },
-  micButton: {
-    width: 36, height: 36, borderRadius: 18,
-    justifyContent: 'center', alignItems: 'center',
-  },
+  micButton: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
   chatInput: {
     flex: 1, fontSize: 15, fontFamily: 'Inter_400Regular', color: colors.textPrimary,
     paddingVertical: Platform.OS === 'ios' ? 10 : 6,
   },
   sendButton: {
-    width: 40, height: 40, borderRadius: 20,
-    justifyContent: 'center', alignItems: 'center',
+    width: 40, height: 40, borderRadius: 20, justifyContent: 'center', alignItems: 'center',
     backgroundColor: 'rgba(212,255,0,0.1)',
   },
-  sendButtonActive: {
-    backgroundColor: colors.primary,
-  },
+  sendButtonActive: { backgroundColor: colors.primary },
   aiResponseContainer: {
     backgroundColor: 'rgba(212,255,0,0.08)', borderRadius: radius.lg,
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.2)',
     padding: spacing.md, marginBottom: spacing.sm,
   },
-  aiResponseHeader: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs,
-  },
+  aiResponseHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs },
   aiResponseAvatar: {
     width: 20, height: 20, borderRadius: 10,
     backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
   },
-  aiResponseLabel: {
-    fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.primary, letterSpacing: 1.5,
-  },
-  aiResponseText: {
-    fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary, lineHeight: 21,
-  },
-  aiLoadingRow: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
-  },
-  aiLoadingText: {
-    fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic',
-  },
+  aiResponseLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.primary, letterSpacing: 1.5 },
+  aiResponseText: { fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary, lineHeight: 21 },
+  aiLoadingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  aiLoadingText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, fontStyle: 'italic' },
 
   // Rest preview (inline in progress bar)
   restPreviewInline: {
@@ -1296,9 +971,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8, paddingVertical: 3,
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.1)',
   },
-  restPreviewInlineText: {
-    fontSize: 11, fontFamily: 'Inter_600SemiBold', color: colors.textSecondary,
-  },
+  restPreviewInlineText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: colors.textSecondary },
 
   // Push suggestion banner
   pushBanner: {
@@ -1312,14 +985,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginTop: 2,
   },
   pushBannerContent: { flex: 1 },
-  pushBannerTitle: {
-    fontSize: 10, fontFamily: 'Inter_800ExtraBold', color: 'rgb(34,197,94)',
-    letterSpacing: 2, marginBottom: 4,
-  },
-  pushBannerText: {
-    fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(34,197,94,0.85)',
-    lineHeight: 18,
-  },
+  pushBannerTitle: { fontSize: 10, fontFamily: 'Inter_800ExtraBold', color: 'rgb(34,197,94)', letterSpacing: 2, marginBottom: 4 },
+  pushBannerText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(34,197,94,0.85)', lineHeight: 18 },
 
   // Estimated weight banner
   estimateBanner: {
@@ -1333,14 +1000,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center', marginTop: 2,
   },
   estimateBannerContent: { flex: 1 },
-  estimateBannerTitle: {
-    fontSize: 10, fontFamily: 'Inter_800ExtraBold', color: 'rgb(251,191,36)',
-    letterSpacing: 2, marginBottom: 4,
-  },
-  estimateBannerText: {
-    fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(251,191,36,0.85)',
-    lineHeight: 18,
-  },
+  estimateBannerTitle: { fontSize: 10, fontFamily: 'Inter_800ExtraBold', color: 'rgb(251,191,36)', letterSpacing: 2, marginBottom: 4 },
+  estimateBannerText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: 'rgba(251,191,36,0.85)', lineHeight: 18 },
 
   // Completion overlay
   completeOverlay: {
@@ -1353,10 +1014,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.15)',
     padding: spacing.xl, gap: spacing.lg,
   },
-  completeTitle: {
-    fontSize: 22, fontFamily: 'Inter_800ExtraBold', color: colors.primary,
-    letterSpacing: 3,
-  },
+  completeTitle: { fontSize: 22, fontFamily: 'Inter_800ExtraBold', color: colors.primary, letterSpacing: 3 },
   completeStatsGrid: {
     flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center',
     gap: spacing.md, width: '100%',
@@ -1364,12 +1022,9 @@ const styles = StyleSheet.create({
   completeStat: {
     alignItems: 'center', minWidth: 80, padding: spacing.sm,
     backgroundColor: 'rgba(212,255,0,0.05)', borderRadius: radius.md,
-    borderWidth: 1, borderColor: 'rgba(212,255,0,0.08)',
-    flex: 1,
+    borderWidth: 1, borderColor: 'rgba(212,255,0,0.08)', flex: 1,
   },
-  completeStatValue: {
-    fontSize: 24, fontFamily: 'Inter_800ExtraBold', color: colors.textPrimary,
-  },
+  completeStatValue: { fontSize: 24, fontFamily: 'Inter_800ExtraBold', color: colors.textPrimary },
   completeStatLabel: {
     fontSize: 10, fontFamily: 'Inter_500Medium', color: colors.textSecondary,
     textTransform: 'uppercase', letterSpacing: 1, marginTop: 2,
@@ -1379,23 +1034,15 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, borderWidth: 1, borderColor: 'rgba(212,255,0,0.15)',
     padding: spacing.md,
   },
-  completeCoachText: {
-    fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary,
-    lineHeight: 21, textAlign: 'center',
-  },
+  completeCoachText: { fontSize: 14, fontFamily: 'Inter_400Regular', color: colors.textPrimary, lineHeight: 21, textAlign: 'center' },
   completeFinishButton: {
     width: '100%', paddingVertical: 18, borderRadius: radius.lg,
     backgroundColor: colors.primary, alignItems: 'center',
   },
-  completeFinishText: {
-    fontSize: 18, fontFamily: 'Inter_800ExtraBold', color: colors.bgDark,
-    letterSpacing: 2,
-  },
+  completeFinishText: { fontSize: 18, fontFamily: 'Inter_800ExtraBold', color: colors.bgDark, letterSpacing: 2 },
 
   // Weight badge
-  weightBadge: {
-    paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4,
-  },
+  weightBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   weightBadgeText: { fontSize: 11, fontFamily: 'Inter_700Bold' },
 
   // RPE selector
@@ -1404,49 +1051,23 @@ const styles = StyleSheet.create({
     borderRadius: 24, backgroundColor: 'rgba(28,31,13,0.3)',
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.05)', gap: spacing.sm,
   },
-  rpeHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start',
-  },
-  rpeTitle: {
-    fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textPrimary,
-    textTransform: 'uppercase', letterSpacing: 1.5,
-  },
-  rpeSelectedValue: {
-    fontSize: 24, fontFamily: 'Inter_800ExtraBold', color: colors.primary,
-  },
-  rpeHelpButton: {
-    flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4,
-  },
-  rpeHelpText: {
-    fontSize: 10, fontFamily: 'Inter_400Regular', color: 'rgba(212,255,0,0.4)',
-  },
+  rpeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  rpeTitle: { fontSize: 11, fontFamily: 'Inter_700Bold', color: colors.textPrimary, textTransform: 'uppercase', letterSpacing: 1.5 },
+  rpeSelectedValue: { fontSize: 24, fontFamily: 'Inter_800ExtraBold', color: colors.primary },
+  rpeHelpButton: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  rpeHelpText: { fontSize: 10, fontFamily: 'Inter_400Regular', color: 'rgba(212,255,0,0.4)' },
   rpeTooltip: {
     position: 'absolute', top: 36, left: 0, zIndex: 10,
     backgroundColor: '#1c1f0d', borderWidth: 1, borderColor: 'rgba(212,255,0,0.2)',
     padding: spacing.sm, borderRadius: radius.sm, width: 200,
   },
-  rpeTooltipText: {
-    fontSize: 11, fontFamily: 'Inter_400Regular', color: colors.textSecondary,
-  },
-  rpeSliderContainer: {
-    width: '100%', paddingVertical: spacing.md, paddingHorizontal: spacing.xs,
-  },
-  rpeSlider: {
-    width: '100%', height: 40,
-  },
-  rpeSliderLabels: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    paddingHorizontal: 4, marginTop: 4,
-  },
-  rpeSliderLabel: {
-    fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.textSecondary,
-  },
-  rpeDescription: {
-    fontSize: 12, fontFamily: 'Inter_400Regular', color: 'rgba(212,255,0,0.8)',
-  },
-  rpeDescriptionBold: {
-    fontFamily: 'Inter_700Bold',
-  },
+  rpeTooltipText: { fontSize: 11, fontFamily: 'Inter_400Regular', color: colors.textSecondary },
+  rpeSliderContainer: { width: '100%', paddingVertical: spacing.md, paddingHorizontal: spacing.xs },
+  rpeSlider: { width: '100%', height: 40 },
+  rpeSliderLabels: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, marginTop: 4 },
+  rpeSliderLabel: { fontSize: 10, fontFamily: 'Inter_700Bold', color: colors.textSecondary },
+  rpeDescription: { fontSize: 12, fontFamily: 'Inter_400Regular', color: 'rgba(212,255,0,0.8)' },
+  rpeDescriptionBold: { fontFamily: 'Inter_700Bold' },
 
   // Exercise demo image
   exerciseImageContainer: {
@@ -1454,13 +1075,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bgCard, borderWidth: 1, borderColor: colors.borderSubtle,
     overflow: 'hidden',
   },
-  exerciseImage: {
-    width: '100%', height: 280, backgroundColor: colors.bgDarker,
-  },
-  exerciseImageCaption: {
-    fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary,
-    padding: spacing.md, lineHeight: 19,
-  },
+  exerciseImage: { width: '100%', height: 280, backgroundColor: colors.bgDarker },
+  exerciseImageCaption: { fontSize: 13, fontFamily: 'Inter_400Regular', color: colors.textSecondary, padding: spacing.md, lineHeight: 19 },
 
   // Share workout
   shareButton: {
@@ -1468,21 +1084,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm, paddingVertical: 14, borderRadius: radius.lg,
     borderWidth: 1, borderColor: 'rgba(212,255,0,0.3)', backgroundColor: 'rgba(212,255,0,0.05)',
   },
-  shareButtonText: {
-    fontSize: 14, fontFamily: 'Inter_700Bold', color: colors.primary,
-  },
-  shareImageContainer: {
-    width: '100%', alignItems: 'center', gap: spacing.sm,
-  },
-  shareImage: {
-    width: '100%', height: 320, borderRadius: radius.md,
-  },
+  shareButtonText: { fontSize: 14, fontFamily: 'Inter_700Bold', color: colors.primary },
+  shareImageContainer: { width: '100%', alignItems: 'center', gap: spacing.sm },
+  shareImage: { width: '100%', height: 320, borderRadius: radius.md },
   shareActionButton: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.xs,
     paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
     borderRadius: radius.full, backgroundColor: colors.primary,
   },
-  shareActionText: {
-    fontSize: 13, fontFamily: 'Inter_700Bold', color: colors.bgDark,
-  },
+  shareActionText: { fontSize: 13, fontFamily: 'Inter_700Bold', color: colors.bgDark },
 });

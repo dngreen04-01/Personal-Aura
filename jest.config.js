@@ -1,5 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
+  resetModules: true,
   transform: {
     '^.+\\.[jt]sx?$': 'babel-jest',
   },
@@ -11,6 +12,8 @@ module.exports = {
     '^expo-apple-authentication$': '<rootDir>/__mocks__/expo-apple-authentication.js',
     '^expo-crypto$': '<rootDir>/__mocks__/expo-crypto.js',
     '^react-native$': '<rootDir>/__mocks__/react-native.js',
+    '^expo-sqlite$': '<rootDir>/__mocks__/expo-sqlite.js',
+    '^@react-native-async-storage/async-storage$': '<rootDir>/__mocks__/async-storage.js',
     '^firebase/auth$': '<rootDir>/__mocks__/firebase-auth.js',
     '^\\.?\\.?/?(?:lib/)?firebase$': '<rootDir>/__mocks__/firebase.js',
   },
