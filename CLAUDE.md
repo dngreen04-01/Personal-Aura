@@ -84,6 +84,25 @@ npx jest --watch      # Watch mode
 - **Mobile**: Expo EAS builds
 - **API**: Docker → Google Cloud Run (`server/Dockerfile`)
 - **Production API**: `https://aura-api-177339568703.us-central1.run.app`
+- **GCP Project**: `aura-fitness-api` (not the default gcloud project)
+
+```bash
+# Deploy API to Cloud Run
+# 1. Copy any new shared lib files into server/lib/ (Dockerfile build context is server/)
+cp lib/validateBlockPlan.js server/lib/validateBlockPlan.js
+cp lib/constants.js server/lib/constants.js
+
+# 2. Deploy from server/ directory
+cd server && gcloud run deploy aura-api \
+  --source . \
+  --project aura-fitness-api \
+  --region us-central1 \
+  --allow-unauthenticated
+```
+
+**Important**: The server requires shared files from `lib/` via `require('../../lib/...')`. The Dockerfile COPYs these from `server/lib/` to `/lib/` in the container. When adding new `require('../../lib/...')` imports to server code, you must:
+1. Add a `COPY lib/<file>.js /lib/<file>.js` line to `server/Dockerfile`
+2. Copy the file into `server/lib/` (and commit it)
 
 ## Skill routing
 
