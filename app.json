@@ -44,8 +44,7 @@
         }
       ],
       "@react-native-google-signin/google-signin",
-      "expo-apple-authentication",
-      "@notifee/react-native"
+      "expo-apple-authentication"
     ],
     "extra": {
       "router": {},
