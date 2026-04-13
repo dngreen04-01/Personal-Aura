@@ -24,13 +24,16 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: aura-fitness-api
 
       - name: Build and deploy to Cloud Run
         working-directory: server
         run: |
-          gcloud builds submit --tag gcr.io/aura-fitness-api/aura-api
+          gcloud builds submit --project aura-fitness-api --tag gcr.io/aura-fitness-api/aura-api
 
           gcloud run deploy aura-api \
+            --project aura-fitness-api \
             --image gcr.io/aura-fitness-api/aura-api \
             --region us-central1 \
             --platform managed \
