@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, ActivityIndicator, KeyboardAvoidingView, Platform, Modal,
@@ -51,7 +51,6 @@ export default function WorkoutScreen() {
   const currentExercise = exercises[currentExIdx];
   const totalSets = parseInt(currentExercise?.sets) || 4;
   const targetReps = parseInt(currentExercise?.reps) || 8;
-  const targetWeight = parseFloat(currentExercise?.targetWeight) || 0;
   const restDuration = parseInt(currentExercise?.restSeconds) || 90;
 
   // --- Exercise state hook ---
@@ -106,9 +105,9 @@ export default function WorkoutScreen() {
   const [showExerciseDetail, setShowExerciseDetail] = useState(false);
   const [showExerciseHub, setShowExerciseHub] = useState(false);
 
-  // Recover timer on mount (called from session init via useEffect in useWorkoutSession)
-  // We trigger it once session is ready
-  useState(() => { recoverTimer(); });
+  // Recover timer on mount — reads SQLite, re-arms countdown or fires the
+  // Begin Set modal if the timer already expired while the user was away.
+  useEffect(() => { recoverTimer(); }, [recoverTimer]);
 
   // --- Derived ---
   const formatTime = (secs) => {
@@ -484,7 +483,7 @@ export default function WorkoutScreen() {
             <View style={styles.targetSection}>
               <Text style={styles.targetLabel}>TARGET GOAL</Text>
               <View style={styles.targetValues}>
-                <Text style={styles.targetNumber}>{lastLoggedWeight != null ? lastLoggedWeight : (weightUnit === 'lbs' ? Math.round(targetWeight * 2.20462) : targetWeight)}<Text style={styles.targetUnit}>{weightUnit}</Text></Text>
+                <Text style={styles.targetNumber}>{lastLoggedWeight != null ? lastLoggedWeight : weight}<Text style={styles.targetUnit}>{weightUnit}</Text></Text>
                 <Text style={styles.targetX}> × </Text>
                 <Text style={styles.targetNumber}>{targetReps}<Text style={styles.targetUnit}>Reps</Text></Text>
               </View>

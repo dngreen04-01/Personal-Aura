@@ -4,7 +4,7 @@ const { generateExerciseDemo } = require('./visual');
 const { buildAgentContext } = require('./memory');
 const { AGENTS, TIMEOUTS, withTimeout, buildAgentResponse, logInteraction } = require('./types');
 const { evaluateSet, checkMilestone, buildMotivationDirective } = require('./motivation');
-const { MINUTES_PER_EXERCISE, MIN_WORKOUT_DURATION } = require('../../lib/constants');
+const { calculateWorkoutDuration } = require('../../lib/calculateWorkoutDuration');
 
 
 /**
@@ -89,6 +89,7 @@ async function routeRequest({ message, history, userContext }) {
   // --- Ready intent: deterministic response, no LLM needed ---
   if (intent === 'ready') {
     const exercises = userContext.currentDay?.exercises || [];
+    const blocks = userContext.currentDay?.blocks;
     const totalLatency = Date.now() - startTime;
     logInteraction({
       userMessage: message,
@@ -101,8 +102,9 @@ async function routeRequest({ message, history, userContext }) {
       text: "Let's crush it! Here's your workout:",
       workoutCard: {
         focus: userContext.currentDay?.focus || 'Workout',
+        blocks,
         exercises,
-        estimatedDuration: Math.max(MIN_WORKOUT_DURATION, exercises.length * MINUTES_PER_EXERCISE),
+        estimatedDuration: calculateWorkoutDuration({ blocks, exercises }),
         modificationType: 'original',
       },
       agentsUsed: [AGENTS.memory],

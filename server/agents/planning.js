@@ -1,5 +1,10 @@
 const { GoogleGenAI } = require('@google/genai');
 const { formatTrainingHistory } = require('./memory');
+const {
+  calculateWorkoutDuration,
+  describeFormulaForPrompt,
+  parseTargetMinutesFromInstruction,
+} = require('../../lib/calculateWorkoutDuration');
 
 const MODEL_NAME = 'gemini-3.1-pro-preview';
 
@@ -19,15 +24,18 @@ Primary/Secondary Movers:
 const PROGRESSIVE_OVERLOAD_RULES = `Progressive Overload Rules:
 - Build Muscle: Push when avg RPE < 7, rep range 8-12
 - Increase Strength: Push when avg RPE < 8, rep range 3-6
-- Lose Fat: Push conservatively when avg RPE < 6, use half the normal increment (min 1kg), maintain higher rep ranges 12-15
+- Lose Fat: Push conservatively when avg RPE < 5 (keep jumps the same size, just rarer), rep range 12-15
 - Plateau Detection: If no weight increase for 6+ sets of an exercise, flag as plateaued and suggest exercise variation or rep scheme change
 - RPE Calibration: If average RPE > 9, reduce weight by 5% for recovery
 
 Equipment-Specific Increments (use these when suggesting weight increases):
-- Barbell exercises: +2.5kg upper body, +5kg lower body (plate pairs)
+- Barbell upper body (bench, OHP, row): +2.5kg (one pair of 1.25kg plates)
+- Barbell lower body (squat, deadlift, RDL, hip thrust): +5kg minimum (one pair of 2.5kg plates)
 - Dumbbell exercises: +2kg per hand
 - Cable exercises: +5kg (stack pin increments)
-- Machine exercises: +5kg (stack pin increments)`;
+- Machine exercises: +5kg (stack pin increments)
+
+HARD RULE: Never suggest a weight increment smaller than the equipment minimum above. Barbell compounds do not load in 1kg or 1.25kg jumps — the smallest sensible jump on a deadlift or squat is 5kg, not 2.5kg and definitely not 1.25kg. If a user is close to failing at the current weight, suggest holding rather than inventing a sub-minimum step.`;
 
 const BASE_IDENTITY = `You are Aura's Planning Agent — an exercise physiologist specializing in program design, exercise selection, and biomechanics.
 
@@ -220,6 +228,14 @@ async function handleWorkoutModification(argsOrMessage, agentContext) {
   // Build training history context
   const trainingHistoryBlock = formatTrainingHistory(agentContext);
 
+  const targetMinutes = parseTargetMinutesFromInstruction(instructions);
+  const durationBlock = targetMinutes
+    ? `Target duration: ${targetMinutes} minutes (derived from the user's request).
+${describeFormulaForPrompt()}
+You MUST pick blocks whose computed duration (using the formula above) lands within ±5 minutes of ${targetMinutes}. Set "estimatedDuration" to that computed value — do NOT guess.`
+    : `${describeFormulaForPrompt()}
+Set "estimatedDuration" by computing the formula above over the blocks you chose — do NOT guess.`;
+
   const systemPrompt = `${BASE_IDENTITY}
 
 Your task: ${modificationType === 'replace'
@@ -233,6 +249,9 @@ ${contextBlock}
 ${trainingHistoryBlock}
 
 User's request: ${instructions}
+
+Duration Budget:
+${durationBlock}
 
 Training History Guardrails:
 - ALWAYS check the Recent Training History before selecting exercises.
@@ -287,6 +306,12 @@ You MUST respond with valid JSON matching this exact schema:
     });
 
     const parsed = JSON.parse(response.text);
+    if (parsed.workoutCard) {
+      parsed.workoutCard.estimatedDuration = calculateWorkoutDuration({
+        blocks: parsed.workoutCard.blocks,
+        exercises: parsed.workoutCard.exercises,
+      });
+    }
     return {
       text: parsed.text,
       workoutCard: parsed.workoutCard,
@@ -308,9 +333,16 @@ async function handlePlanRegeneration({ userProfile, currentPlan, workoutHistory
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY missing');
 
+  const targetMinutesPerSession = Number(schedule?.minutesPerSession) || 60;
+
   const systemPrompt = `${BASE_IDENTITY}
 
 Your task: Analyze the user's workout history (up to 30 days) and current plan, then generate an updated plan that applies progressive overload and addresses plateaus.
+
+Duration Budget (per training day):
+Target: ${targetMinutesPerSession} minutes per session.
+${describeFormulaForPrompt()}
+Each day's blocks MUST compute to within ±5 min of ${targetMinutesPerSession} using the formula above. Rest days are exempt.
 
 Analysis Framework:
 ${PROGRESSIVE_OVERLOAD_RULES}

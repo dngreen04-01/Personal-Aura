@@ -4,7 +4,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, spacing, radius } from '../lib/theme';
-import { MINUTES_PER_EXERCISE, MIN_WORKOUT_DURATION } from '../lib/constants';
+import { calculateWorkoutDuration } from '../lib/calculateWorkoutDuration';
 
 const CATEGORY_ICONS = {
   push: 'fitness-center',
@@ -72,7 +72,7 @@ export default function ChangeFocusScreen() {
           const exerciseCount = day.exercises?.length || 0;
           const estMinutes = day.focus.toLowerCase().includes('rest')
             ? 20
-            : Math.max(MIN_WORKOUT_DURATION, exerciseCount * MINUTES_PER_EXERCISE);
+            : calculateWorkoutDuration({ blocks: day.blocks, exercises: day.exercises });
 
           return (
             <View key={i} style={styles.card}>
