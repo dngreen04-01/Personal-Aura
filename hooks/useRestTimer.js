@@ -1,8 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { AppState } from 'react-native';
 import * as Haptics from 'expo-haptics';
-import { saveRestTimer, clearRestTimer, getActiveRestTimer, saveSessionState } from '../lib/database';
+import { saveRestTimer, clearRestTimer, getActiveRestTimer, saveSessionState, markRestTimerAlarmFired } from '../lib/database';
 import { showTimerNotification, scheduleAlarmNotification, fireAlarmNow, stopAlarm, cancelAll, notifee, EventType, ACTION_BEGIN_SET, ACTION_EXTEND_15S } from '../lib/notifications';
+
+// If the alarm fired more than STALE_ALARM_MS ago (persisted in SQLite), we
+// surface the Begin Set modal silently instead of re-triggering the looping
+// in-app sound on re-entry.
+const STALE_ALARM_MS = 120000;
+const ALARM_LOOP_CAP_MS = 120000;
 
 /**
  * Manages the rest timer lifecycle: countdown, persistence across app kills,
@@ -30,18 +36,28 @@ export default function useRestTimer({
   const pendingAdvanceRef = useRef(null);
   const restIdRef = useRef(null);
   const alarmSoundCapRef = useRef(null);
+  // Synchronous mirror of alarmFired so rapid AppState flips / re-entries
+  // can't double-fire the looping sound before React commits.
+  const alarmFiredRef = useRef(false);
+
+  const armAlarmLoopCap = useCallback(() => {
+    if (alarmSoundCapRef.current) clearTimeout(alarmSoundCapRef.current);
+    alarmSoundCapRef.current = setTimeout(() => stopAlarm(), ALARM_LOOP_CAP_MS);
+  }, []);
 
   // --- Rest complete: fire alarm & show Begin Set modal ---
   const completeRest = useCallback(() => {
+    if (alarmFiredRef.current) return;
+    alarmFiredRef.current = true;
     setIsResting(false);
     setRestRemaining(0);
     restEndTimeRef.current = null;
     setAlarmFired(true);
     fireAlarmNow(restIdRef.current);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    alarmSoundCapRef.current = setTimeout(() => stopAlarm(), 300000);
-    clearRestTimer().catch(() => {});
-  }, []);
+    armAlarmLoopCap();
+    markRestTimerAlarmFired(Date.now()).catch(() => {});
+  }, [armAlarmLoopCap]);
 
   // --- User taps "Begin Set" ---
   const handleBeginSet = useCallback(() => {
@@ -49,6 +65,7 @@ export default function useRestTimer({
     stopAlarm();
     cancelAll();
     clearRestTimer().catch(() => {});
+    alarmFiredRef.current = false;
     setAlarmFired(false);
     const advance = pendingAdvanceRef.current;
     pendingAdvanceRef.current = null;
@@ -60,6 +77,7 @@ export default function useRestTimer({
     if (alarmSoundCapRef.current) { clearTimeout(alarmSoundCapRef.current); alarmSoundCapRef.current = null; }
     stopAlarm();
     cancelAll();
+    alarmFiredRef.current = false;
     setAlarmFired(false);
     restEndTimeRef.current = Date.now() + 15000;
     setIsResting(true);
@@ -75,6 +93,7 @@ export default function useRestTimer({
     restEndTimeRef.current = null;
     cancelAll();
     clearRestTimer().catch(() => {});
+    alarmFiredRef.current = false;
     setAlarmFired(false);
     const advance = pendingAdvanceRef.current;
     pendingAdvanceRef.current = null;
@@ -85,6 +104,8 @@ export default function useRestTimer({
 
   // --- Start a new rest period ---
   const startRest = useCallback((exerciseName, duration, afterRestCallback) => {
+    alarmFiredRef.current = false;
+    setAlarmFired(false);
     restIdRef.current = Date.now();
     restEndTimeRef.current = restIdRef.current + duration * 1000;
     setIsResting(true);
@@ -113,6 +134,55 @@ export default function useRestTimer({
     return () => clearInterval(interval);
   }, [isResting, completeRest]);
 
+  // --- Timer recovery (single source of truth, re-entrant) ---
+  // Reads persisted state from SQLite and reconciles in-memory state.
+  // Safe to call from mount, AppState 'active', or anywhere else.
+  const recoverTimer = useCallback(async () => {
+    try {
+      const saved = await getActiveRestTimer();
+      if (!saved) return;
+
+      const now = Date.now();
+      const remaining = Math.max(0, Math.ceil((saved.rest_end_time - now) / 1000));
+      restIdRef.current = saved.rest_id;
+
+      if (remaining > 0) {
+        // Timer still running — resume countdown and re-arm notifications.
+        restEndTimeRef.current = saved.rest_end_time;
+        alarmFiredRef.current = false;
+        setAlarmFired(false);
+        setRestRemaining(remaining);
+        setIsResting(true);
+        showTimerNotification(saved.exercise_name || 'Rest', remaining, saved.rest_id);
+        scheduleAlarmNotification(remaining, saved.rest_id);
+        return;
+      }
+
+      // Timer expired. Show Begin Set modal. If we're already mid-alarm,
+      // don't replay the sound.
+      if (alarmFiredRef.current) return;
+      alarmFiredRef.current = true;
+      restEndTimeRef.current = null;
+      setIsResting(false);
+      setRestRemaining(0);
+      setAlarmFired(true);
+
+      // If the alarm was already fired long enough ago that we'd be pestering
+      // the user with a stale loop, surface the modal silently.
+      const firedAt = saved.alarm_fired_at || 0;
+      const stale = firedAt > 0 && (now - firedAt) > STALE_ALARM_MS;
+
+      fireAlarmNow(saved.rest_id, { playSound: !stale });
+      if (!stale) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        armAlarmLoopCap();
+      }
+      if (firedAt === 0) {
+        markRestTimerAlarmFired(now).catch(() => {});
+      }
+    } catch {}
+  }, [armAlarmLoopCap]);
+
   // --- AppState listener: foreground/background ---
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
@@ -127,23 +197,12 @@ export default function useRestTimer({
         }
       }
       if (nextState === 'active') {
-        if (alarmFired) {
-          cancelAll();
-          return;
-        }
-        if (restEndTimeRef.current) {
-          const remaining = Math.max(0, Math.ceil((restEndTimeRef.current - Date.now()) / 1000));
-          if (remaining <= 0) {
-            completeRest();
-          } else {
-            setRestRemaining(remaining);
-            setIsResting(true);
-          }
-        }
+        // SQLite is the source of truth across unmount/remount and JS freeze.
+        recoverTimer();
       }
     });
     return () => sub.remove();
-  }, [completeRest, alarmFired, sessionId, day, currentExIdx, currentSet, completedExercises, exerciseSets]);
+  }, [recoverTimer, sessionId, day, currentExIdx, currentSet, completedExercises, exerciseSets]);
 
   // --- Notifee foreground action handler ---
   useEffect(() => {
@@ -161,29 +220,6 @@ export default function useRestTimer({
     });
     return unsub;
   }, [handleBeginSet, handleExtendRest, alarmFired]);
-
-  // --- Timer recovery on mount ---
-  const recoverTimer = useCallback(async () => {
-    try {
-      const saved = await getActiveRestTimer();
-      if (saved) {
-        const remaining = Math.max(0, Math.ceil((saved.rest_end_time - Date.now()) / 1000));
-        restIdRef.current = saved.rest_id;
-        if (remaining > 0) {
-          restEndTimeRef.current = saved.rest_end_time;
-          setIsResting(true);
-          setRestRemaining(remaining);
-          showTimerNotification(saved.exercise_name || 'Rest', remaining, saved.rest_id);
-          scheduleAlarmNotification(remaining, saved.rest_id);
-        } else {
-          setAlarmFired(true);
-          fireAlarmNow(saved.rest_id);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          alarmSoundCapRef.current = setTimeout(() => stopAlarm(), 300000);
-        }
-      }
-    } catch {}
-  }, []);
 
   // Cleanup on unmount
   useEffect(() => {
