@@ -12,6 +12,7 @@ COPY . .
 COPY lib/constants.js /lib/constants.js
 COPY lib/validateBlockPlan.js /lib/validateBlockPlan.js
 COPY lib/calculateWorkoutDuration.js /lib/calculateWorkoutDuration.js
+COPY lib/calculateWorkoutDuration.js /lib/calculateWorkoutDuration.js
 COPY lib/incrementUtils.js /lib/incrementUtils.js
 
 EXPOSE 8080
