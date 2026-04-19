@@ -17,21 +17,21 @@
 ### Account Linking (merge auth providers)
 **What:** Add `linkWithCredential()` support so users can connect multiple sign-in methods (e.g., link Google to existing email/password account).
 **Why:** Prevents data fragmentation if a user signs up with email, then later wants to also use Google. Without linking, same email on different providers creates separate Firebase UIDs with separate data.
-**Effort:** M (human) / S (CC+gstack)
+**Effort:** M (human) / S (CC)
 **Depends on:** Google + Apple Sign-In feature (shipped)
 **Context:** Firebase docs on account linking. Add a "Linked Accounts" section in profile screen (`app/(tabs)/profile.js`). Use `linkWithCredential()` from `firebase/auth`.
 
 ### iOS CI Build
 **What:** Add iOS build step to `.github/workflows/build-mobile.yml`.
 **Why:** Apple Sign-In is iOS-only. Without iOS CI, build regressions are caught manually. Current CI only builds Android.
-**Effort:** S (human) / S (CC+gstack)
+**Effort:** S (human) / S (CC)
 **Depends on:** Apple Developer account + EAS iOS signing credentials configured
 **Context:** Add `eas build --platform ios --profile preview --non-interactive` step to the existing workflow. Requires EAS credentials as GitHub secrets.
 
 ### Training Intelligence Service (Approach C)
 **What:** Extract a dedicated `TrainingIntelligence` service that maintains a running model of the user's training state: muscle group fatigue levels, progressive overload readiness per exercise, weekly volume targets vs actuals, and deload signals. Agents query this service instead of raw DB functions.
 **Why:** The current approach (Approach B) passes raw history to AI prompts and relies on the LLM to reason about muscle group balance, fatigue, and progressive overload. A dedicated service would compute these deterministically, making AI decisions more consistent and reducing prompt size. Also enables auto-triggered plan adjustments when the user's actual training diverges from their plan.
-**Effort:** L (human) / M (CC+gstack)
+**Effort:** L (human) / M (CC)
 **Priority:** P2
 **Depends on:** Approach B (history-aware context) shipped and validated with real users
 **Context:** Identified during CEO review 2026-03-31. The ideal long-term architecture, but premature for a pre-PMF app. Revisit after validating that history-aware prompts (Approach B) meaningfully improve workout quality from user feedback.
