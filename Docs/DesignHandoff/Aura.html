@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aura — AI Fitness Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,700;1,9..144,400&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #0a0a0a; font-family: 'Inter', system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow: hidden; height: 100%; }
+  #root { width: 100%; height: 100%; }
+
+  @keyframes auraOrbIdle {
+    0%, 100% { transform: scale(1); filter: hue-rotate(0deg); }
+    50% { transform: scale(1.04); filter: hue-rotate(8deg); }
+  }
+  @keyframes auraOrbPulse {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 14px rgba(212,255,0,0.35), inset 0 0 8px rgba(0,0,0,0.3); }
+    50% { transform: scale(1.15); box-shadow: 0 0 24px rgba(212,255,0,0.7), inset 0 0 8px rgba(0,0,0,0.3); }
+  }
+  @keyframes thinkPulse {
+    0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+    40% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  /* scrollbar */
+  *::-webkit-scrollbar { width: 6px; height: 6px; }
+  *::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+
+  button { font-family: inherit; }
+  button:active { transform: scale(0.97); }
+  button { transition: transform 0.1s ease, background 0.15s ease; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="aura-data.jsx"></script>
+<script type="text/babel" src="aura-shared.jsx"></script>
+<script type="text/babel" src="aura-chat.jsx"></script>
+<script type="text/babel" src="aura-workout.jsx"></script>
+<script type="text/babel" src="aura-progress.jsx"></script>
+<script type="text/babel" src="aura-summary.jsx"></script>
+<script type="text/babel" src="aura-share.jsx"></script>
+<script type="text/babel" src="aura-app.jsx"></script>
+</body>
+</html>

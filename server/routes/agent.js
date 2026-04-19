@@ -1,10 +1,9 @@
 const express = require('express');
-const { GoogleGenAI } = require('@google/genai');
 const { routeRequest } = require('../agents/router');
 const { generateExerciseDemo, generateFormCheck, generateWorkoutCard } = require('../agents/visual');
 const { AGENTS } = require('../agents/types');
+const { generateGreetingTree } = require('../agents/greeting');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { MINUTES_PER_EXERCISE } = require('../../lib/constants');
 const { getWorkoutStreak, getUserProfile } = require('../services/firestore');
 const router = express.Router();
 
@@ -25,8 +24,7 @@ router.get('/health', (req, res) => {
 });
 
 router.post('/greet', asyncHandler(async (req, res) => {
-  const { userContext } = req.body;
-  const { buildGreetingContext } = require('../agents/memory');
+  const { userContext, locationName, locationsCount } = req.body;
   const uid = req.user?.uid;
 
   // Enrich greeting context with Firestore streak data
@@ -39,42 +37,18 @@ router.post('/greet', asyncHandler(async (req, res) => {
         enrichedContext.lastWorkoutDate = streak.lastWorkoutDate;
       }
     } catch (err) {
-      // Non-blocking — fall back to client-provided context
       console.warn('[Agent/greet] Firestore streak lookup failed:', err.message);
     }
   }
 
-  const greetingContext = buildGreetingContext(enrichedContext);
-
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'GEMINI_API_KEY missing' });
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const systemPrompt = `You are Aura, a warm and motivating personal training coach. Generate a brief greeting (2-3 sentences) for the user before their workout.
-
-${greetingContext}
-
-Guidelines:
-- Reference the time of day naturally
-- If they have an active streak, mention it encouragingly (e.g., "3 days strong!")
-- If they have recent progress (PRs, volume increases), mention one highlight briefly
-- Describe today's scheduled workout specifically: name the focus area, exercise count, and estimated duration (assume ~${MINUTES_PER_EXERCISE} min per exercise including rest periods)
-- Ask if they're ready or want to adjust anything (shorter, different focus, etc.)
-- Be warm, motivating, and concise — no generic filler`;
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.1-flash-lite-preview',
-    contents: 'Generate a greeting for the user before their workout.',
-    config: {
-      systemInstruction: systemPrompt,
-    },
+  const tree = await generateGreetingTree({
+    userContext: enrichedContext,
+    locationName: locationName || null,
+    locationsCount: typeof locationsCount === 'number' ? locationsCount : 1,
   });
 
-  const text = response.text;
-  res.json({ text });
+  // Preserve legacy `text` field for any old clients that only read that.
+  res.json({ text: tree.text, chips: tree.chips, branches: tree.branches });
 }));
 
 router.post('/', asyncHandler(async (req, res) => {

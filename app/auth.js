@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, KeyboardAvoidingView,
@@ -13,9 +13,12 @@ import {
   signInWithGoogle, signInWithApple,
   statusCodes,
 } from '../lib/auth';
+import { useAuth } from '../lib/authContext';
+import { hasCompletedOnboarding } from '../lib/database';
 
 export default function AuthScreen() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [mode, setMode] = useState('signin'); // 'signin' | 'signup' | 'reset'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -24,6 +27,21 @@ export default function AuthScreen() {
   const [error, setError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+
+  // When the user becomes authenticated (after signup/signin), route forward.
+  // AuthProvider only updates context state — it doesn't navigate, so this screen
+  // needs to do it since app/index.js is no longer mounted after router.replace('/auth').
+  useEffect(() => {
+    if (authLoading || !user) return;
+    (async () => {
+      try {
+        const onboarded = await hasCompletedOnboarding();
+        router.replace(onboarded ? '/(tabs)' : '/onboarding');
+      } catch {
+        router.replace('/onboarding');
+      }
+    })();
+  }, [user, authLoading]);
 
   const handleSubmit = async () => {
     setError(null);
