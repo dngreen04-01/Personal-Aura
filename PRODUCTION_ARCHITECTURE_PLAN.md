@@ -929,7 +929,7 @@ Security rules were deployed in Phase 1 and cover all collections: users, exerci
 3. **CORS is defense-in-depth for mobile**: React Native `fetch` calls don't send `Origin` headers the way browsers do, so CORS restrictions are less critical for a mobile-only backend. Still good practice.
 4. **Workload Identity Federation preferred over service account keys**: The CI/CD pipeline uses WIF for keyless GCP authentication, avoiding long-lived credentials in GitHub Secrets.
 5. **Staging environment intentionally omitted**: For a personal app, a single production environment with the deploy script is sufficient. Add staging only if user base grows.
-6. **Secret rotation advisory**: The Gemini API key `AIzaSyBXmN09K7bdEODboFYvgOp2DS_2Of0Uyz8` is in git history from earlier commits. It should be rotated in Google AI Studio. The Firebase API key is a client-side key restricted by security rules and is not a critical secret.
+6. **Secret rotation advisory**: The Gemini API key was previously committed to this file and has been rotated in Google AI Studio. Never commit API keys; keep them in `.env` (gitignored) or Secret Manager. The Firebase API key is a client-side key restricted by security rules and is not a critical secret.
 
 ---
 
