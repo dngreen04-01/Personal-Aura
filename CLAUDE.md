@@ -28,7 +28,11 @@ npx expo start -c
 # Run tests
 npx jest              # All tests
 npx jest --watch      # Watch mode
+npx jest --selectProjects unit     # Node tests with stubbed react-native + real SQLite (better-sqlite3)
+npx jest --selectProjects native   # jest-expo tests for screens, hooks and notifications (__tests__/native/)
 ```
+
+Tests marked `test.failing` reproduce known bugs from the app review. They pass while the bug is present. When a fix lands Jest reports them as failing, so flip them to a plain `test` in the same PR as the fix.
 
 ## Architecture
 
